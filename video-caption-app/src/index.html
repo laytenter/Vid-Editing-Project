@@ -1,0 +1,77 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Video Caption App</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <h1>Video Caption App (MVP)</h1>
+  <div id="dropZone">Drop video here</div>
+  <section class="paths">
+    <div class="path-row"><span class="label">Output Folder:</span><span id="outputDirLabel">(auto)</span></div>
+    <div class="actions">
+      <button id="chooseOutputDirButton">Choose Output Folder...</button>
+      <button id="openOutputDirButton">Open Output Folder</button>
+      <button id="openTempFolderButton">Open Temp Folder</button>
+    </div>
+    <div class="path-row">
+      <label><input type="checkbox" id="saveWavCheckbox" /> Save extracted WAV to output folder</label>
+    </div>
+    <div class="path-row">
+      <label><input type="checkbox" id="saveCaptionsCheckbox" /> Auto-save captions (.srt/.vtt) to output folder</label>
+    </div>
+  </section>
+
+  <div class="actions">
+    <button id="selectVideoButton">Select Video</button>
+    <button id="extractAudioButton" disabled>Extract Audio</button>
+    <button id="generateCaptionsButton" disabled>Generate Captions</button>
+    <button id="saveSrtButton" disabled>Save SRT</button>
+    <button id="saveVttButton" disabled>Save VTT</button>
+  </div>
+  <section class="paths">
+    <div class="path-row"><span class="label">Clip Video</span></div>
+    <div class="actions">
+      <input id="clipStart" placeholder="HH:MM:SS.mmm" />
+      <input id="clipEnd" placeholder="HH:MM:SS.mmm" />
+      <select id="clipMode">
+        <option value="copy">Copy (fast)</option>
+        <option value="encode">Encode (accurate)</option>
+      </select>
+      <button id="clipCreateBtn" type="button">Create clip</button>
+    </div>
+  </section>
+
+  <section class="paths">
+    <div class="path-row"><span class="label">Video:</span><span id="selectedVideoPath">(none)</span></div>
+    <div class="path-row"><span class="label">Audio:</span><span id="audioPath">(none)</span></div>
+    <div class="path-row"><span class="label">SRT:</span><span id="srtPath">(none)</span></div>
+    <div class="path-row"><span class="label">VTT:</span><span id="vttPath">(none)</span></div>
+  </section>
+
+  <div class="actions">
+    <label><input type="checkbox" id="showRawLogsCheckbox" /> Show raw logs</label>
+    <label>
+      Filter:
+      <select id="logFilterSelect">
+        <option value="all">all</option>
+        <option value="ffmpeg">ffmpeg</option>
+        <option value="whisper">whisper</option>
+        <option value="errors">errors</option>
+      </select>
+    </label>
+    <button id="copyLogButton" type="button">Copy log</button>
+  </div>
+
+  <pre id="logPanel"></pre>
+
+  <script>var exports = {}; var module = { exports: exports };</script>
+  <script src="./renderer.js"></script>
+</body>
+</html>
+
+
+
+

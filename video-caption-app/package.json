@@ -1,0 +1,21 @@
+{
+  "name": "video-caption-app",
+  "version": "1.0.0",
+  "description": "Local video caption desktop app",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-static.js",
+    "start": "npm run build && set ELECTRON_RUN_AS_NODE=&& .\\node_modules\\.bin\\electron.cmd ."
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "electron-store": "^8.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "electron": "^40.4.1",
+    "typescript": "^5.8.2"
+  }
+}

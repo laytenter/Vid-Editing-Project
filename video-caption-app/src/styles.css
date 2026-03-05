@@ -1,0 +1,79 @@
+﻿body {
+  font-family: Segoe UI, sans-serif;
+  margin: 24px;
+  background: #f7f7f8;
+  color: #1f1f1f;
+}
+
+h1 {
+  margin-top: 0;
+  margin-bottom: 16px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+button {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid #3f63dd;
+  background: #4d74ff;
+  color: #ffffff;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.paths {
+  background: #ffffff;
+  border: 1px solid #d9d9df;
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 16px;
+}
+
+.path-row {
+  margin-bottom: 8px;
+  word-break: break-all;
+}
+
+.path-row:last-child {
+  margin-bottom: 0;
+}
+
+.label {
+  font-weight: 600;
+  margin-right: 8px;
+}
+
+pre {
+  margin: 0;
+  background: #12141a;
+  color: #c8d3f5;
+  border-radius: 8px;
+  padding: 12px;
+  min-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+#dropZone {
+  margin-bottom: 16px;
+  padding: 16px;
+  border: 2px dashed #3f63dd;
+  border-radius: 10px;
+  text-align: center;
+  background: #f0f4ff;
+  color: #2b3a8a;
+}
+#dropZone.drop-active {
+  background: #e0e8ff;
+  border-color: #1f3fff;
+}
