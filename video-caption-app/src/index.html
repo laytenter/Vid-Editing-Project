@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -34,9 +34,9 @@
   <section class="paths">
     <div class="path-row"><span class="label">Clip Video</span></div>
     <div class="actions">
-      <input id="clipStart" placeholder="HH:MM:SS.mmm" />
-      <input id="clipEnd" placeholder="HH:MM:SS.mmm" />
-      <select id="clipMode">
+      <input id="clipStart" aria-label="Clip start time" title="Clip start time" placeholder="HH:MM:SS.mmm" />
+      <input id="clipEnd" aria-label="Clip end time" title="Clip end time" placeholder="HH:MM:SS.mmm" />
+      <select id="clipMode" aria-label="Clip mode" title="Clip mode">
         <option value="copy">Copy (fast)</option>
         <option value="encode">Encode (accurate)</option>
       </select>
@@ -71,6 +71,7 @@
   <script src="./renderer.js"></script>
 </body>
 </html>
+
 
 
 
