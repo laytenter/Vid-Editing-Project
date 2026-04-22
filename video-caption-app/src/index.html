@@ -4,10 +4,18 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Video Caption App</title>
+  <link rel="icon" type="image/svg+xml" href="./app-logo.svg" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
-  <h1>Video Caption App (MVP)</h1>
+  <header class="hero">
+    <img class="app-logo" src="./app-logo.svg" alt="Video Caption App logo" width="72" height="72" />
+    <div class="hero-copy">
+      <p class="eyebrow">Local video workflow</p>
+      <h1>Video Caption App</h1>
+      <p class="hero-tagline">Generate captions, export subtitle files, and clip footage locally with FFmpeg and Whisper.</p>
+    </div>
+  </header>
   <div id="dropZone">Drop video here</div>
   <section class="paths">
     <div class="path-row"><span class="label">Output Folder:</span><span id="outputDirLabel">(auto)</span></div>
@@ -71,8 +79,3 @@
   <script src="./renderer.js"></script>
 </body>
 </html>
-
-
-
-
-
