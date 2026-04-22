@@ -16,7 +16,29 @@
       <p class="hero-tagline">Generate captions, export subtitle files, and clip footage locally with FFmpeg and Whisper.</p>
     </div>
   </header>
-  <div id="dropZone">Drop video here</div>
+
+  <section class="source-panel">
+    <div class="section-header">
+      <div>
+        <p class="eyebrow section-eyebrow">Media Source</p>
+        <h2 class="section-title">Start from video or skip straight to audio</h2>
+        <p class="section-copy">Upload a video if you want to extract audio and create clips, or upload an existing audio file when you only need captions.</p>
+      </div>
+      <span id="captionSourceStatus" class="status-pill" data-state="idle">No source selected</span>
+    </div>
+    <div id="dropZone">Drop video or audio here</div>
+    <div class="actions">
+      <button id="selectVideoButton">Upload Video</button>
+      <button id="selectAudioButton">Upload Audio</button>
+      <button id="extractAudioButton" disabled>Extract Audio</button>
+      <button id="generateCaptionsButton" disabled>Generate Captions</button>
+    </div>
+    <div class="actions actions-secondary">
+      <button id="saveSrtButton" disabled>Save SRT</button>
+      <button id="saveVttButton" disabled>Save VTT</button>
+    </div>
+  </section>
+
   <section class="paths">
     <div class="path-row"><span class="label">Output Folder:</span><span id="outputDirLabel">(auto)</span></div>
     <div class="actions">
@@ -32,13 +54,6 @@
     </div>
   </section>
 
-  <div class="actions">
-    <button id="selectVideoButton">Select Video</button>
-    <button id="extractAudioButton" disabled>Extract Audio</button>
-    <button id="generateCaptionsButton" disabled>Generate Captions</button>
-    <button id="saveSrtButton" disabled>Save SRT</button>
-    <button id="saveVttButton" disabled>Save VTT</button>
-  </div>
   <section class="paths">
     <div class="path-row"><span class="label">Clip Video</span></div>
     <div class="actions">
@@ -53,8 +68,8 @@
   </section>
 
   <section class="paths">
-    <div class="path-row"><span class="label">Video:</span><span id="selectedVideoPath">(none)</span></div>
-    <div class="path-row"><span class="label">Audio:</span><span id="audioPath">(none)</span></div>
+    <div class="path-row"><span class="label">Selected Video:</span><span id="selectedVideoPath">(none)</span></div>
+    <div class="path-row"><span class="label">Caption Audio:</span><span id="audioPath">(none)</span></div>
     <div class="path-row"><span class="label">SRT:</span><span id="srtPath">(none)</span></div>
     <div class="path-row"><span class="label">VTT:</span><span id="vttPath">(none)</span></div>
   </section>

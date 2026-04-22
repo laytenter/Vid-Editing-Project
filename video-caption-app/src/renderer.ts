@@ -5,6 +5,8 @@
   documentsDir: string;
 };
 
+type AudioSourceKind = "uploaded" | "extracted" | null;
+
 function mustGet<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
   if (!el) throw new Error(`Missing element #${id} in index.html`);
@@ -12,10 +14,12 @@ function mustGet<T extends HTMLElement>(id: string): T {
 }
 
 const selectVideoButton = mustGet<HTMLButtonElement>("selectVideoButton");
+const selectAudioButton = mustGet<HTMLButtonElement>("selectAudioButton");
 const extractAudioButton = mustGet<HTMLButtonElement>("extractAudioButton");
 const generateCaptionsButton = mustGet<HTMLButtonElement>("generateCaptionsButton");
 const saveSrtButton = mustGet<HTMLButtonElement>("saveSrtButton");
 const saveVttButton = mustGet<HTMLButtonElement>("saveVttButton");
+const captionSourceStatusNode = mustGet<HTMLElement>("captionSourceStatus");
 
 const selectedVideoPathNode = mustGet<HTMLElement>("selectedVideoPath");
 const audioPathNode = mustGet<HTMLElement>("audioPath");
@@ -42,11 +46,13 @@ let selectedVideoPath: string | null = null;
 let audioPath: string | null = null;
 let srtPath: string | null = null;
 let vttPath: string | null = null;
+let audioSourceKind: AudioSourceKind = null;
 let isBusy = false;
 let settingsBusy = false;
 let currentSettings: AppSettings | null = null;
 
 const allowedVideoExtensions = new Set(["mp4", "mov", "mkv", "avi", "webm", "m4v"]);
+const allowedAudioExtensions = new Set(["wav", "mp3", "m4a", "aac", "flac", "ogg", "opus", "wma", "aiff", "aif"]);
 
 showRawLogsCheckbox.checked = false;
 logFilterSelect.value = "all";
@@ -76,6 +82,15 @@ function isSupportedVideoPath(filePath: string): boolean {
   return allowedVideoExtensions.has(extensionMatch[1]);
 }
 
+function isSupportedAudioPath(filePath: string): boolean {
+  const extensionMatch = filePath.toLowerCase().match(/\.([^.\\/]+)$/);
+  if (!extensionMatch) {
+    return false;
+  }
+
+  return allowedAudioExtensions.has(extensionMatch[1]);
+}
+
 function setBusy(next: boolean): void {
   isBusy = next;
   syncButtons();
@@ -92,6 +107,7 @@ function syncButtons(): void {
   saveSrtButton.disabled = isBusy || !srtPath;
   saveVttButton.disabled = isBusy || !vttPath;
   selectVideoButton.disabled = isBusy;
+  selectAudioButton.disabled = isBusy;
 
   chooseOutputDirButton.disabled = isBusy || settingsBusy;
   openOutputDirButton.disabled = isBusy || settingsBusy;
@@ -101,7 +117,7 @@ function syncButtons(): void {
   clipCreateButton.disabled = isBusy || !selectedVideoPath;
 }
 
-function getVideoDirectoryFromPath(filePath: string): string | null {
+function getDirectoryFromPath(filePath: string): string | null {
   const normalized = filePath.replace(/\//g, "\\");
   const index = normalized.lastIndexOf("\\");
   if (index <= 0) {
@@ -111,7 +127,7 @@ function getVideoDirectoryFromPath(filePath: string): string | null {
   return normalized.slice(0, index);
 }
 
-function getVideoBaseName(filePath: string): string {
+function getBaseNameFromPath(filePath: string): string {
   const normalized = filePath.replace(/\//g, "\\");
   const lastSeparatorIndex = normalized.lastIndexOf("\\");
   const fileName = lastSeparatorIndex >= 0 ? normalized.slice(lastSeparatorIndex + 1) : normalized;
@@ -119,6 +135,34 @@ function getVideoBaseName(filePath: string): string {
   const rawBaseName = extensionIndex > 0 ? fileName.slice(0, extensionIndex) : fileName;
   const safeBaseName = rawBaseName.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").trim();
   return safeBaseName.length > 0 ? safeBaseName : "video";
+}
+
+function getCaptionContextPath(): string | null {
+  if (!audioPath) {
+    return selectedVideoPath;
+  }
+
+  if (audioSourceKind === "uploaded") {
+    return audioPath;
+  }
+
+  return selectedVideoPath ?? audioPath;
+}
+
+function getCaptionSourceStatus(): { label: string; state: string } {
+  if (audioSourceKind === "uploaded" && audioPath) {
+    return { label: "Uploaded audio ready", state: "uploaded" };
+  }
+
+  if (audioSourceKind === "extracted" && audioPath) {
+    return { label: "Extracted audio ready", state: "extracted" };
+  }
+
+  if (selectedVideoPath) {
+    return { label: "Video selected", state: "video-ready" };
+  }
+
+  return { label: "No source selected", state: "idle" };
 }
 
 function normalizeTimeForFileName(value: string): string {
@@ -138,7 +182,7 @@ function joinOutputPath(outputDir: string, fileName: string): string {
   return `${outputDir}${separator}${fileName}`;
 }
 
-function getEffectiveOutputDirectory(): string {
+function getEffectiveOutputDirectory(contextPath: string | null = getCaptionContextPath()): string {
   if (!currentSettings) {
     return "(auto)";
   }
@@ -147,8 +191,8 @@ function getEffectiveOutputDirectory(): string {
     return currentSettings.outputDir;
   }
 
-  if (selectedVideoPath) {
-    return getVideoDirectoryFromPath(selectedVideoPath) ?? currentSettings.documentsDir;
+  if (contextPath) {
+    return getDirectoryFromPath(contextPath) ?? currentSettings.documentsDir;
   }
 
   return currentSettings.documentsDir;
@@ -173,6 +217,9 @@ function refreshPaths(): void {
   audioPathNode.textContent = audioPath ?? "(none)";
   srtPathNode.textContent = srtPath ?? "(none)";
   vttPathNode.textContent = vttPath ?? "(none)";
+  const sourceStatus = getCaptionSourceStatus();
+  captionSourceStatusNode.textContent = sourceStatus.label;
+  captionSourceStatusNode.dataset.state = sourceStatus.state;
   updateOutputDirLabel();
 }
 
@@ -314,10 +361,22 @@ function applySelectedVideo(videoPath: string): void {
   audioPath = null;
   srtPath = null;
   vttPath = null;
+  audioSourceKind = null;
 
   refreshPaths();
   syncButtons();
   appendLog(`Selected video: ${selectedVideoPath}`);
+}
+
+function applySelectedAudio(nextAudioPath: string): void {
+  audioPath = nextAudioPath;
+  srtPath = null;
+  vttPath = null;
+  audioSourceKind = "uploaded";
+
+  refreshPaths();
+  syncButtons();
+  appendLog(`Selected audio: ${audioPath}`);
 }
 
 try {
@@ -434,6 +493,25 @@ selectVideoButton.addEventListener("click", async () => {
   }
 });
 
+selectAudioButton.addEventListener("click", async () => {
+  setBusy(true);
+
+  try {
+    const chosenPath = await window.videoTools.selectAudio();
+
+    if (!chosenPath) {
+      appendLog("Audio selection cancelled.");
+      return;
+    }
+
+    applySelectedAudio(chosenPath);
+  } catch (error) {
+    appendLog(`Select audio failed: ${(error as Error).message}`);
+  } finally {
+    setBusy(false);
+  }
+});
+
 window.addEventListener("menu:open-video", (event: Event) => {
   const customEvent = event as CustomEvent<string>;
   const videoPath = customEvent.detail;
@@ -474,20 +552,31 @@ dropZone.addEventListener("drop", (event) => {
 
   const files = event.dataTransfer?.files;
   if (!files || files.length !== 1) {
-    appendLog("Drop rejected: not a supported video type");
+    appendLog("Drop rejected: not a supported video or audio type");
     return;
   }
 
   const droppedFile = files[0] as File & { path?: string };
   const droppedPath = typeof droppedFile.path === "string" ? droppedFile.path.trim() : "";
 
-  if (!droppedPath || !isSupportedVideoPath(droppedPath)) {
-    appendLog("Drop rejected: not a supported video type");
+  if (!droppedPath) {
+    appendLog("Drop rejected: not a supported video or audio type");
     return;
   }
 
-  applySelectedVideo(droppedPath);
-  appendLog(`Dropped video: ${droppedPath}`);
+  if (isSupportedVideoPath(droppedPath)) {
+    applySelectedVideo(droppedPath);
+    appendLog(`Dropped video: ${droppedPath}`);
+    return;
+  }
+
+  if (isSupportedAudioPath(droppedPath)) {
+    applySelectedAudio(droppedPath);
+    appendLog(`Dropped audio: ${droppedPath}`);
+    return;
+  }
+
+  appendLog("Drop rejected: not a supported video or audio type");
 });
 
 chooseOutputDirButton.addEventListener("click", async () => {
@@ -583,16 +672,16 @@ clipCreateButton.addEventListener("click", async () => {
   }
 
   const mode = clipModeSelect.value === "encode" ? "encode" : "copy";
-  const fallbackOutputDir = getVideoDirectoryFromPath(selectedVideoPath) ?? "";
-  let outputDir = currentSettings ? getEffectiveOutputDirectory() : fallbackOutputDir;
-if (outputDir === "(auto)") outputDir = fallbackOutputDir;
+  const fallbackOutputDir = getDirectoryFromPath(selectedVideoPath) ?? "";
+  let outputDir = currentSettings ? getEffectiveOutputDirectory(selectedVideoPath) : fallbackOutputDir;
+  if (outputDir === "(auto)") outputDir = fallbackOutputDir;
 
   if (outputDir === "") {
     appendLog("Create clip failed: unable to resolve output directory.");
     return;
   }
 
-  const baseName = getVideoBaseName(selectedVideoPath);
+  const baseName = getBaseNameFromPath(selectedVideoPath);
   const safeStart = normalizeTimeForFileName(startTime);
   const safeEnd = normalizeTimeForFileName(endTime);
   const fileName = `${baseName}_clip_${safeStart}-${safeEnd}_${Date.now()}.mp4`;
@@ -629,6 +718,7 @@ extractAudioButton.addEventListener("click", async () => {
     audioPath = result.audioPath;
     srtPath = null;
     vttPath = null;
+    audioSourceKind = "extracted";
 
     refreshPaths();
     syncButtons();
@@ -653,7 +743,7 @@ generateCaptionsButton.addEventListener("click", async () => {
   try {
     const result = await window.videoTools.runWhisper({
       audioPath,
-      videoPath: selectedVideoPath
+      sourcePath: getCaptionContextPath()
     });
     srtPath = result.srtPath;
     vttPath = result.vttPath;
@@ -681,7 +771,7 @@ saveSrtButton.addEventListener("click", async () => {
     const savedPath = await window.videoTools.saveFileAs({
       sourcePath: srtPath,
       defaultFileName: "captions.srt",
-      videoPath: selectedVideoPath
+      mediaPath: getCaptionContextPath()
     });
 
     appendLog(savedPath ? `Saved SRT to: ${savedPath}` : "SRT save cancelled.");
@@ -703,7 +793,7 @@ saveVttButton.addEventListener("click", async () => {
     const savedPath = await window.videoTools.saveFileAs({
       sourcePath: vttPath,
       defaultFileName: "captions.vtt",
-      videoPath: selectedVideoPath
+      mediaPath: getCaptionContextPath()
     });
 
     appendLog(savedPath ? `Saved VTT to: ${savedPath}` : "VTT save cancelled.");

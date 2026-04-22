@@ -20,7 +20,7 @@ export interface ExtractAudioResult {
 
 export interface RunWhisperRequest {
   audioPath: string;
-  videoPath?: string | null;
+  sourcePath?: string | null;
 }
 
 export interface RunWhisperResult {
@@ -47,5 +47,5 @@ export interface ClipVideoResult {
 export interface SaveFileAsRequest {
   sourcePath: string;
   defaultFileName?: string;
-  videoPath?: string | null;
+  mediaPath?: string | null;
 }

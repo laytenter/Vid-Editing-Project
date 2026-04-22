@@ -30,6 +30,9 @@ const videoToolsApi = {
   selectVideo: (): Promise<string | null> => {
     return ipcRenderer.invoke("select-video");
   },
+  selectAudio: (): Promise<string | null> => {
+    return ipcRenderer.invoke("select-audio");
+  },
   extractAudio: (videoPath: string): Promise<ExtractAudioResult> => {
     return ipcRenderer.invoke("extract-audio", videoPath);
   },

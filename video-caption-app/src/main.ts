@@ -135,17 +135,17 @@ function updatePersistedSettings(partial: Partial<PersistedSettings>): Persisted
   return getPersistedSettings();
 }
 
-function resolveDefaultSaveDirectory(videoPathInput?: string | null): string {
+function resolveDefaultSaveDirectory(mediaPathInput?: string | null): string {
   const settings = getPersistedSettings();
 
   if (settings.outputDir && existsSync(settings.outputDir)) {
     return settings.outputDir;
   }
 
-  if (typeof videoPathInput === "string" && videoPathInput.trim() !== "") {
-    const videoDir = path.dirname(path.resolve(videoPathInput));
-    if (existsSync(videoDir)) {
-      return videoDir;
+  if (typeof mediaPathInput === "string" && mediaPathInput.trim() !== "") {
+    const mediaDir = path.dirname(path.resolve(mediaPathInput));
+    if (existsSync(mediaDir)) {
+      return mediaDir;
     }
   }
 
@@ -166,13 +166,13 @@ function normalizeRunWhisperRequest(input: unknown): RunWhisperRequest {
     throw new Error("run-whisper request.audioPath must be a non-empty string");
   }
 
-  if (request.videoPath !== undefined && request.videoPath !== null && typeof request.videoPath !== "string") {
-    throw new Error("run-whisper request.videoPath must be a string, null, or undefined");
+  if (request.sourcePath !== undefined && request.sourcePath !== null && typeof request.sourcePath !== "string") {
+    throw new Error("run-whisper request.sourcePath must be a string, null, or undefined");
   }
 
   return {
     audioPath: request.audioPath,
-    videoPath: request.videoPath ?? null
+    sourcePath: request.sourcePath ?? null
   };
 }
 
@@ -220,6 +220,23 @@ async function promptVideoSelection(ownerWindow?: BrowserWindowType): Promise<st
     properties: ["openFile"],
     filters: [
       { name: "Video Files", extensions: ["mp4", "mov", "mkv", "avi", "webm", "m4v"] },
+      { name: "All Files", extensions: ["*"] }
+    ]
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+
+  return path.resolve(result.filePaths[0]);
+}
+
+async function promptAudioSelection(ownerWindow?: BrowserWindowType): Promise<string | null> {
+  const result = await showOpenDialogForWindow(ownerWindow, {
+    title: "Select Audio",
+    properties: ["openFile"],
+    filters: [
+      { name: "Audio Files", extensions: ["wav", "mp3", "m4a", "aac", "flac", "ogg", "opus", "wma", "aiff", "aif"] },
       { name: "All Files", extensions: ["*"] }
     ]
   });
@@ -439,6 +456,10 @@ app.whenReady().then(() => {
     return promptVideoSelection(getOwnerWindowFromEvent(event));
   });
 
+  ipcMain.handle("select-audio", async (event): Promise<string | null> => {
+    return promptAudioSelection(getOwnerWindowFromEvent(event));
+  });
+
   ipcMain.handle("extract-audio", async (event, videoPath: unknown): Promise<ExtractAudioResult> => {
     const resolvedVideoPath = normalizeExistingFile(videoPath, "videoPath");
     const settings = getPersistedSettings();
@@ -537,9 +558,9 @@ app.whenReady().then(() => {
   ipcMain.handle("run-whisper", async (event, input: unknown): Promise<RunWhisperResult> => {
     const request = normalizeRunWhisperRequest(input);
     const audioPath = normalizeExistingFile(request.audioPath, "audioPath");
-    const normalizedVideoPath =
-      typeof request.videoPath === "string" && request.videoPath.trim() !== "" ? path.resolve(request.videoPath) : null;
-    const baseName = getSafeBaseName(normalizedVideoPath ?? audioPath);
+    const normalizedSourcePath =
+      typeof request.sourcePath === "string" && request.sourcePath.trim() !== "" ? path.resolve(request.sourcePath) : null;
+    const baseName = getSafeBaseName(normalizedSourcePath ?? audioPath);
 
     const tempDir = resolveTempDir();
     const outputBase = path.resolve(tempDir, "captions");
@@ -565,7 +586,7 @@ app.whenReady().then(() => {
     const settings = getPersistedSettings();
 
     if (settings.saveCaptionsToOutputDir) {
-      const outputDir = resolveDefaultSaveDirectory(normalizedVideoPath ?? audioPath);
+      const outputDir = resolveDefaultSaveDirectory(normalizedSourcePath ?? audioPath);
       const copiedSrtPath = getUniqueFilePath(outputDir, baseName, ".srt");
       const copiedVttPath = getUniqueFilePath(outputDir, baseName, ".vtt");
 
@@ -588,7 +609,7 @@ app.whenReady().then(() => {
       typeof request?.defaultFileName === "string" && request.defaultFileName.trim() !== ""
         ? request.defaultFileName.trim()
         : path.basename(sourcePath);
-    const defaultDirectory = resolveDefaultSaveDirectory(request?.videoPath);
+    const defaultDirectory = resolveDefaultSaveDirectory(request?.mediaPath);
 
     const filters =
       expectedExt === ".srt"
