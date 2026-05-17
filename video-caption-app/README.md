@@ -14,7 +14,7 @@ This project provides a privacy-friendly, local workflow for generating captions
 ## Features
 
 - Select video files via file dialog or drag and drop
-- Upload existing audio files to skip extraction when you only need captions
+- Upload existing `.wav`, `.mp3`, or `.m4a` audio files to skip extraction when you only need captions
 - Extract mono 16 kHz WAV audio with FFmpeg
 - Generate captions locally with Whisper runtime binaries
 - Save captions as `.srt` or `.vtt`
@@ -73,11 +73,17 @@ Typical workflow:
 
 ## Basic usage
 
-1. Upload a video or audio file (button or drag/drop).
+1. Upload a video or supported audio file (`.wav`, `.mp3`, or `.m4a`) using the button or drag/drop.
 2. If you started with video, click **Extract Audio**.
 3. Click **Generate Captions**.
 4. Export captions with **Save SRT** or **Save VTT**.
 5. Create clips by entering start/end timestamps, selecting mode, and clicking **Create clip** when a video is selected.
+
+## Uploaded audio support
+
+- `.wav` uploads are passed directly to Whisper.
+- `.mp3` uploads are passed directly to Whisper.
+- `.m4a` uploads are converted with FFmpeg to temporary mono 16 kHz WAV before Whisper runs.
 
 ## Current limitations
 

@@ -407,6 +407,32 @@ function runTool(
   });
 }
 
+async function resolveWhisperAudioPath(event: IpcMainInvokeEvent, audioPath: string): Promise<string> {
+  if (path.extname(audioPath).toLowerCase() !== ".m4a") {
+    return audioPath;
+  }
+
+  const tempDir = resolveTempDir();
+  const convertedAudioPath = getUniqueFilePath(tempDir, `${getSafeBaseName(audioPath)}_uploaded`, ".wav");
+  const args = [
+    "-y",
+    "-i",
+    audioPath,
+    "-vn",
+    "-ac",
+    "1",
+    "-ar",
+    "16000",
+    "-c:a",
+    "pcm_s16le",
+    convertedAudioPath
+  ];
+
+  await runTool(event, "ffmpeg", resolveBinaryPath("ffmpeg.exe"), args, path.dirname(audioPath));
+
+  return convertedAudioPath;
+}
+
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
     width: 980,
@@ -573,9 +599,10 @@ app.whenReady().then(() => {
       throw new Error(`Model not found: ${modelPath}`);
     }
 
-    const args = ["-m", modelPath, "-f", audioPath, "-of", outputBase, "-osrt", "-ovtt"];
+    const whisperAudioPath = await resolveWhisperAudioPath(event, audioPath);
+    const args = ["-m", modelPath, "-f", whisperAudioPath, "-of", outputBase, "-osrt", "-ovtt"];
 
-    await runTool(event, "whisper", resolveBinaryPath("whisper.exe"), args, path.dirname(audioPath));
+    await runTool(event, "whisper", resolveBinaryPath("whisper.exe"), args, path.dirname(whisperAudioPath));
 
     if (!existsSync(tempSrtPath) || !existsSync(tempVttPath)) {
       throw new Error("Whisper finished without producing expected SRT/VTT files");
