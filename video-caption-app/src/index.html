@@ -39,6 +39,16 @@
     </div>
   </section>
 
+  <section class="paths action-status-panel" aria-live="polite">
+    <div class="action-status-header">
+      <span id="actionStatus" class="label">Idle</span>
+      <span id="actionProgressText" class="action-progress-text">Idle</span>
+    </div>
+    <div id="actionProgressTrack" class="action-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+      <div id="actionProgressBar" class="action-progress-bar"></div>
+    </div>
+  </section>
+
   <section class="paths">
     <div class="path-row"><span class="label">Output Folder:</span><span id="outputDirLabel">(auto)</span></div>
     <div class="actions">
@@ -84,21 +94,27 @@
     <div class="path-row"><span class="label">VTT:</span><span id="vttPath">(none)</span></div>
   </section>
 
-  <div class="actions">
-    <label><input type="checkbox" id="showRawLogsCheckbox" /> Show raw logs</label>
-    <label>
-      Filter:
-      <select id="logFilterSelect">
-        <option value="all">all</option>
-        <option value="ffmpeg">ffmpeg</option>
-        <option value="whisper">whisper</option>
-        <option value="errors">errors</option>
-      </select>
+  <div class="raw-log-section">
+    <label id="rawLogsToggleLabel" class="raw-log-toggle">
+      <input type="checkbox" id="showRawLogsCheckbox" />
+      <span id="rawLogsToggleText">Show raw logs</span>
     </label>
-    <button id="copyLogButton" type="button">Copy log</button>
+    <div id="rawLogDetails" class="raw-log-details" hidden>
+      <div class="actions">
+        <label>
+          Filter:
+          <select id="logFilterSelect">
+            <option value="all">all</option>
+            <option value="ffmpeg">ffmpeg</option>
+            <option value="whisper">whisper</option>
+            <option value="errors">errors</option>
+          </select>
+        </label>
+        <button id="copyLogButton" type="button">Copy log</button>
+      </div>
+      <pre id="logPanel"></pre>
+    </div>
   </div>
-
-  <pre id="logPanel"></pre>
 
   <script>var exports = {}; var module = { exports: exports };</script>
   <script src="./renderer.js"></script>

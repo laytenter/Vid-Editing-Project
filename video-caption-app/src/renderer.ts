@@ -22,6 +22,10 @@ const saveVttButton = mustGet<HTMLButtonElement>("saveVttButton");
 const captionSourceStatusNode = mustGet<HTMLElement>("captionSourceStatus");
 const captionSegmentsCountNode = mustGet<HTMLElement>("captionSegmentsCount");
 const captionSegmentListNode = mustGet<HTMLElement>("captionSegmentList");
+const actionStatusNode = mustGet<HTMLElement>("actionStatus");
+const actionProgressTrackNode = mustGet<HTMLElement>("actionProgressTrack");
+const actionProgressBarNode = mustGet<HTMLElement>("actionProgressBar");
+const actionProgressTextNode = mustGet<HTMLElement>("actionProgressText");
 
 const selectedVideoPathNode = mustGet<HTMLElement>("selectedVideoPath");
 const audioPathNode = mustGet<HTMLElement>("audioPath");
@@ -37,6 +41,9 @@ const saveWavCheckbox = mustGet<HTMLInputElement>("saveWavCheckbox");
 const saveCaptionsCheckbox = mustGet<HTMLInputElement>("saveCaptionsCheckbox");
 const dropZone = mustGet<HTMLDivElement>("dropZone");
 const showRawLogsCheckbox = mustGet<HTMLInputElement>("showRawLogsCheckbox");
+const rawLogDetails = mustGet<HTMLElement>("rawLogDetails");
+const rawLogsToggleLabel = mustGet<HTMLElement>("rawLogsToggleLabel");
+const rawLogsToggleText = mustGet<HTMLElement>("rawLogsToggleText");
 const logFilterSelect = mustGet<HTMLSelectElement>("logFilterSelect");
 const copyLogButton = mustGet<HTMLButtonElement>("copyLogButton");
 const clipStartInput = mustGet<HTMLInputElement>("clipStart");
@@ -62,6 +69,8 @@ logFilterSelect.value = "all";
 type ToolName = "ffmpeg" | "whisper";
 type StreamName = "stdout" | "stderr";
 type LogFilter = "all" | "ffmpeg" | "whisper" | "errors";
+type ActiveActionKind = "extract" | "caption" | "clip";
+type ActionStatusMode = "idle" | "indeterminate" | "determinate" | "done" | "failed";
 
 interface StoredLogEntry {
   tool?: ToolName;
@@ -78,10 +87,18 @@ interface CaptionSegment {
   text: string;
 }
 
+interface ActiveAction {
+  kind: ActiveActionKind;
+  label: string;
+  startedAtMs: number;
+  totalDurationSeconds: number | null;
+}
+
 const logEntries: StoredLogEntry[] = [];
 const maxLogEntries = 5000;
 let logRenderScheduled = false;
 let captionSegments: CaptionSegment[] = [];
+let activeAction: ActiveAction | null = null;
 
 function isSupportedVideoPath(filePath: string): boolean {
   const extensionMatch = filePath.toLowerCase().match(/\.([^.\\/]+)$/);
@@ -99,6 +116,10 @@ function isSupportedAudioPath(filePath: string): boolean {
   }
 
   return allowedAudioExtensions.has(extensionMatch[1]);
+}
+
+function isM4aAudioPath(filePath: string): boolean {
+  return filePath.toLowerCase().endsWith(".m4a");
 }
 
 function setBusy(next: boolean): void {
@@ -253,6 +274,233 @@ function splitMessageLines(message: string): string[] {
     .split("\n")
     .map((line) => line.trimEnd())
     .filter((line) => line.length > 0);
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function parseTimestampSeconds(value: string): number | null {
+  const match = value
+    .trim()
+    .replace(",", ".")
+    .match(/^(\d+):(\d{2}):(\d{2})(?:\.(\d+))?$/);
+
+  if (!match) {
+    return null;
+  }
+
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const seconds = Number(match[3]);
+  const fraction = match[4] ? Number(`0.${match[4]}`) : 0;
+
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || !Number.isFinite(seconds) || !Number.isFinite(fraction)) {
+    return null;
+  }
+
+  return hours * 3600 + minutes * 60 + seconds + fraction;
+}
+
+function getClipDurationSeconds(startTime: string, endTime: string): number | null {
+  const startSeconds = parseTimestampSeconds(startTime);
+  const endSeconds = parseTimestampSeconds(endTime);
+
+  if (startSeconds === null || endSeconds === null || endSeconds <= startSeconds) {
+    return null;
+  }
+
+  return endSeconds - startSeconds;
+}
+
+function formatRemainingTime(secondsInput: number): string {
+  const totalSeconds = Math.max(0, Math.ceil(secondsInput));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const paddedMinutes = String(minutes).padStart(2, "0");
+  const paddedSeconds = String(seconds).padStart(2, "0");
+
+  if (hours > 0) {
+    return `${String(hours).padStart(2, "0")}:${paddedMinutes}:${paddedSeconds}`;
+  }
+
+  return `${paddedMinutes}:${paddedSeconds}`;
+}
+
+function parseFfmpegDurationSeconds(message: string): number | null {
+  const match = message.match(/Duration:\s*(\d+:\d{2}:\d{2}(?:[,.]\d+)?)/i);
+  return match ? parseTimestampSeconds(match[1]) : null;
+}
+
+function parseFfmpegProgressSeconds(message: string): number | null {
+  const match = message.match(/\btime=\s*(\d+:\d{2}:\d{2}(?:[,.]\d+)?)/i);
+  return match ? parseTimestampSeconds(match[1]) : null;
+}
+
+function parseWhisperPercent(message: string): number | null {
+  const match = message.match(/\b(\d{1,3}(?:\.\d+)?)\s*%/);
+  if (!match) {
+    return null;
+  }
+
+  const percent = Number(match[1]);
+  return Number.isFinite(percent) ? clampNumber(percent, 0, 100) : null;
+}
+
+function setActionStatus(label: string, text: string, mode: ActionStatusMode, percent = 0): void {
+  const clampedPercent = clampNumber(percent, 0, 100);
+  actionStatusNode.textContent = label;
+  actionProgressTextNode.textContent = text;
+  actionProgressBarNode.classList.toggle("is-indeterminate", mode === "indeterminate");
+  actionProgressBarNode.classList.toggle("is-complete", mode === "done");
+  actionProgressBarNode.classList.toggle("is-failed", mode === "failed");
+  actionProgressBarNode.style.width = mode === "indeterminate" ? "34%" : `${clampedPercent}%`;
+
+  if (mode === "determinate" || mode === "done" || mode === "failed") {
+    actionProgressTrackNode.setAttribute("aria-valuenow", String(Math.round(clampedPercent)));
+  } else {
+    actionProgressTrackNode.removeAttribute("aria-valuenow");
+  }
+
+  actionProgressTrackNode.setAttribute("aria-busy", mode === "indeterminate" ? "true" : "false");
+}
+
+function setIdleActionStatus(): void {
+  activeAction = null;
+  setActionStatus("Idle", "Idle", "idle", 0);
+}
+
+function startActionStatus(kind: ActiveActionKind, label: string, totalDurationSeconds: number | null = null): void {
+  activeAction = {
+    kind,
+    label,
+    startedAtMs: Date.now(),
+    totalDurationSeconds
+  };
+
+  if (totalDurationSeconds !== null) {
+    setActionStatus(label, "0%", "determinate", 0);
+    return;
+  }
+
+  setActionStatus(label, "Working...", "indeterminate", 0);
+}
+
+function setActiveActionStage(label: string, totalDurationSeconds: number | null = null): void {
+  if (!activeAction || activeAction.label === label) {
+    return;
+  }
+
+  activeAction.label = label;
+  activeAction.startedAtMs = Date.now();
+  activeAction.totalDurationSeconds = totalDurationSeconds;
+
+  if (totalDurationSeconds !== null) {
+    setActionStatus(label, "0%", "determinate", 0);
+    return;
+  }
+
+  setActionStatus(label, "Working...", "indeterminate", 0);
+}
+
+function updateDeterminateActionProgress(percentInput: number): void {
+  if (!activeAction) {
+    return;
+  }
+
+  const percent = clampNumber(percentInput, 0, 100);
+  const fraction = percent / 100;
+  let text = `${Math.round(percent)}%`;
+
+  if (fraction > 0 && fraction < 1) {
+    const elapsedWallSeconds = (Date.now() - activeAction.startedAtMs) / 1000;
+    const remainingSeconds = elapsedWallSeconds / fraction - elapsedWallSeconds;
+
+    if (Number.isFinite(remainingSeconds) && remainingSeconds >= 0) {
+      text = `${text} - about ${formatRemainingTime(remainingSeconds)} remaining`;
+    }
+  }
+
+  setActionStatus(activeAction.label, text, "determinate", percent);
+}
+
+function updateFfmpegActionProgress(message: string): void {
+  if (!activeAction) {
+    return;
+  }
+
+  const durationSeconds = parseFfmpegDurationSeconds(message);
+  if (durationSeconds !== null && activeAction.totalDurationSeconds === null) {
+    activeAction.totalDurationSeconds = durationSeconds;
+  }
+
+  const progressSeconds = parseFfmpegProgressSeconds(message);
+  if (progressSeconds === null) {
+    return;
+  }
+
+  if (activeAction.totalDurationSeconds === null || activeAction.totalDurationSeconds <= 0) {
+    setActionStatus(activeAction.label, "Working...", "indeterminate", 0);
+    return;
+  }
+
+  updateDeterminateActionProgress((progressSeconds / activeAction.totalDurationSeconds) * 100);
+}
+
+function updateWhisperActionProgress(message: string): void {
+  if (!activeAction) {
+    return;
+  }
+
+  const percent = parseWhisperPercent(message);
+  if (percent === null) {
+    setActionStatus(activeAction.label, "Generating captions...", "indeterminate", 0);
+    return;
+  }
+
+  updateDeterminateActionProgress(percent);
+}
+
+function updateActionProgressFromToolLog(entry: { tool: ToolName; message: string }): void {
+  if (!activeAction) {
+    return;
+  }
+
+  for (const line of splitMessageLines(entry.message)) {
+    if (activeAction.kind === "caption") {
+      if (entry.tool === "ffmpeg") {
+        setActiveActionStage("Converting audio...");
+        updateFfmpegActionProgress(line);
+      } else if (entry.tool === "whisper") {
+        setActiveActionStage("Generating captions...");
+        updateWhisperActionProgress(line);
+      }
+
+      continue;
+    }
+
+    if (entry.tool === "ffmpeg") {
+      updateFfmpegActionProgress(line);
+    }
+  }
+}
+
+function completeActionStatus(): void {
+  activeAction = null;
+  setActionStatus("Done", "Done", "done", 100);
+}
+
+function failActionStatus(message: string): void {
+  activeAction = null;
+  setActionStatus(`Failed: ${message}`, "Failed", "failed", 100);
+}
+
+function syncRawLogVisibility(): void {
+  const showRawLogs = showRawLogsCheckbox.checked;
+  rawLogDetails.hidden = !showRawLogs;
+  rawLogsToggleLabel.classList.toggle("is-active", showRawLogs);
+  rawLogsToggleText.textContent = showRawLogs ? "Hide raw logs" : "Show raw logs";
 }
 
 function normalizeCaptionTime(value: string): string {
@@ -495,6 +743,7 @@ function applySelectedAudio(nextAudioPath: string): void {
 
 try {
   window.videoTools.onToolLog((entry) => {
+    updateActionProgressFromToolLog(entry);
     addLogEntries(entry.message, {
       tool: entry.tool,
       stream: entry.stream
@@ -547,6 +796,7 @@ window.addEventListener("unhandledrejection", (event) => {
 });
 
 showRawLogsCheckbox.addEventListener("change", () => {
+  syncRawLogVisibility();
   scheduleLogPanelRender();
 });
 
@@ -802,6 +1052,7 @@ clipCreateButton.addEventListener("click", async () => {
   const outputPath = joinOutputPath(outputDir, fileName);
 
   setBusy(true);
+  startActionStatus("clip", "Creating clip...", getClipDurationSeconds(startTime, endTime));
 
   try {
     const result = await window.videoTools.clipVideo({
@@ -812,8 +1063,11 @@ clipCreateButton.addEventListener("click", async () => {
       mode
     });
     appendLog(`Clip created: ${result.outputPath}`);
+    completeActionStatus();
   } catch (error) {
-    appendLog(`Create clip failed: ${(error as Error).message}`);
+    const message = (error as Error).message;
+    appendLog(`Create clip failed: ${message}`);
+    failActionStatus(message);
   } finally {
     setBusy(false);
   }
@@ -826,6 +1080,7 @@ extractAudioButton.addEventListener("click", async () => {
 
   setBusy(true);
   appendLog("Starting audio extraction...");
+  startActionStatus("extract", "Extracting audio...");
 
   try {
     const result = await window.videoTools.extractAudio(selectedVideoPath);
@@ -838,10 +1093,12 @@ extractAudioButton.addEventListener("click", async () => {
     refreshPaths();
     syncButtons();
     appendLog(`Audio extracted: ${audioPath}`);
+    completeActionStatus();
   } catch (error) {
     const message = (error as Error).message;
     appendLog(`Audio extraction failed: ${message}`);
     appendSetupHintForMissingDependency(message);
+    failActionStatus(message);
   } finally {
     setBusy(false);
   }
@@ -855,6 +1112,7 @@ generateCaptionsButton.addEventListener("click", async () => {
   setBusy(true);
   appendLog("Starting whisper caption generation...");
   setCaptionSegments([]);
+  startActionStatus("caption", isM4aAudioPath(audioPath) ? "Converting audio..." : "Generating captions...");
 
   try {
     const result = await window.videoTools.runWhisper({
@@ -868,10 +1126,12 @@ generateCaptionsButton.addEventListener("click", async () => {
     refreshPaths();
     syncButtons();
     appendLog(`Captions generated: ${srtPath}, ${vttPath}`);
+    completeActionStatus();
   } catch (error) {
     const message = (error as Error).message;
     appendLog(`Caption generation failed: ${message}`);
     appendSetupHintForMissingDependency(message);
+    failActionStatus(message);
   } finally {
     setBusy(false);
   }
@@ -933,6 +1193,8 @@ async function initSettingsPanel(): Promise<void> {
   }
 }
 
+setIdleActionStatus();
+syncRawLogVisibility();
 refreshPaths();
 renderCaptionSegments();
 syncButtons();
