@@ -24,6 +24,10 @@ const captionSegmentsCountNode = mustGet<HTMLElement>("captionSegmentsCount");
 const captionSegmentListNode = mustGet<HTMLElement>("captionSegmentList");
 const captionSelectionSummaryNode = mustGet<HTMLElement>("captionSelectionSummary");
 const captionClearSelectionButton = mustGet<HTMLButtonElement>("captionClearSelectionButton");
+const previewStatusNode = mustGet<HTMLElement>("previewStatus");
+const previewVideoNode = mustGet<HTMLVideoElement>("previewVideo");
+const previewAudioNode = mustGet<HTMLAudioElement>("previewAudio");
+const previewEmptyNode = mustGet<HTMLElement>("previewEmpty");
 const actionStatusNode = mustGet<HTMLElement>("actionStatus");
 const actionProgressTrackNode = mustGet<HTMLElement>("actionProgressTrack");
 const actionProgressBarNode = mustGet<HTMLElement>("actionProgressBar");
@@ -106,6 +110,9 @@ let captionSegmentUserScrolledUp = false;
 let captionRangeAnchorIndex: number | null = null;
 let captionRangeFocusIndex: number | null = null;
 let captionRangeComplete = false;
+let activePlaybackSegmentIndex: number | null = null;
+let currentPreviewKind: "video" | "audio" | null = null;
+let currentPreviewUrl: string | null = null;
 
 function isSupportedVideoPath(filePath: string): boolean {
   const extensionMatch = filePath.toLowerCase().match(/\.([^.\\/]+)$/);
@@ -203,6 +210,106 @@ function getCaptionSourceStatus(): { label: string; state: string } {
   return { label: "No source selected", state: "idle" };
 }
 
+function getPreviewSource(): { kind: "video" | "audio"; mediaPath: string } | null {
+  if (audioSourceKind === "uploaded" && audioPath) {
+    return { kind: "audio", mediaPath: audioPath };
+  }
+
+  if (selectedVideoPath) {
+    return { kind: "video", mediaPath: selectedVideoPath };
+  }
+
+  if (audioPath) {
+    return { kind: "audio", mediaPath: audioPath };
+  }
+
+  return null;
+}
+
+function encodeFileUrlPath(filePath: string): string {
+  return filePath
+    .replace(/\\/g, "/")
+    .split("/")
+    .map((part, index) => (index === 0 && /^[A-Za-z]:$/.test(part) ? part : encodeURIComponent(part)))
+    .join("/");
+}
+
+function filePathToFileUrl(filePath: string): string {
+  const normalized = filePath.replace(/\\/g, "/");
+
+  if (/^[A-Za-z]:\//.test(normalized)) {
+    return `file:///${encodeFileUrlPath(normalized)}`;
+  }
+
+  if (normalized.startsWith("/")) {
+    return `file://${encodeFileUrlPath(normalized)}`;
+  }
+
+  return `file:///${encodeFileUrlPath(normalized)}`;
+}
+
+function getActivePreviewElement(): HTMLMediaElement | null {
+  if (currentPreviewKind === "video" && !previewVideoNode.hidden) {
+    return previewVideoNode;
+  }
+
+  if (currentPreviewKind === "audio" && !previewAudioNode.hidden) {
+    return previewAudioNode;
+  }
+
+  return null;
+}
+
+function clearActivePlaybackSegment(): void {
+  if (activePlaybackSegmentIndex === null) {
+    return;
+  }
+
+  activePlaybackSegmentIndex = null;
+  renderCaptionSegments();
+}
+
+function updateMediaPreview(): void {
+  const source = getPreviewSource();
+
+  if (!source) {
+    previewStatusNode.textContent = "No media selected";
+    previewEmptyNode.hidden = false;
+    previewVideoNode.hidden = true;
+    previewAudioNode.hidden = true;
+    previewVideoNode.removeAttribute("src");
+    previewAudioNode.removeAttribute("src");
+    previewVideoNode.load();
+    previewAudioNode.load();
+    currentPreviewKind = null;
+    currentPreviewUrl = null;
+    clearActivePlaybackSegment();
+    return;
+  }
+
+  const nextUrl = filePathToFileUrl(source.mediaPath);
+  const nextElement = source.kind === "video" ? previewVideoNode : previewAudioNode;
+  const otherElement = source.kind === "video" ? previewAudioNode : previewVideoNode;
+  const changed = currentPreviewKind !== source.kind || currentPreviewUrl !== nextUrl;
+
+  previewStatusNode.textContent = source.kind === "video" ? "Video preview ready" : "Audio preview ready";
+  previewEmptyNode.hidden = true;
+  nextElement.hidden = false;
+  otherElement.hidden = true;
+
+  if (changed) {
+    previewVideoNode.pause();
+    previewAudioNode.pause();
+    otherElement.removeAttribute("src");
+    otherElement.load();
+    nextElement.src = nextUrl;
+    nextElement.load();
+    currentPreviewKind = source.kind;
+    currentPreviewUrl = nextUrl;
+    clearActivePlaybackSegment();
+  }
+}
+
 function normalizeTimeForFileName(value: string): string {
   return value.replace(/[:.]/g, "-");
 }
@@ -258,6 +365,7 @@ function refreshPaths(): void {
   const sourceStatus = getCaptionSourceStatus();
   captionSourceStatusNode.textContent = sourceStatus.label;
   captionSourceStatusNode.dataset.state = sourceStatus.state;
+  updateMediaPreview();
   updateOutputDirLabel();
 }
 
@@ -546,6 +654,51 @@ function findCaptionSegment(index: number | null): CaptionSegment | null {
   return captionSegments.find((segment) => segment.index === index) ?? null;
 }
 
+function setActivePlaybackSegmentForSeconds(seconds: number): void {
+  const segment =
+    captionSegments.find((candidate) => {
+      const startSeconds = parseTimestampSeconds(candidate.start);
+      const endSeconds = parseTimestampSeconds(candidate.end);
+      return startSeconds !== null && endSeconds !== null && seconds >= startSeconds && seconds < endSeconds;
+    }) ?? null;
+  const nextIndex = segment?.index ?? null;
+
+  if (activePlaybackSegmentIndex === nextIndex) {
+    return;
+  }
+
+  activePlaybackSegmentIndex = nextIndex;
+  renderCaptionSegments();
+}
+
+function seekMediaToTimestamp(timestamp: string): void {
+  const seconds = parseTimestampSeconds(timestamp);
+  const mediaElement = getActivePreviewElement();
+
+  if (seconds === null || !mediaElement) {
+    return;
+  }
+
+  mediaElement.pause();
+
+  try {
+    mediaElement.currentTime = seconds;
+  } catch {
+    return;
+  }
+
+  setActivePlaybackSegmentForSeconds(seconds);
+}
+
+function updateActivePlaybackSegmentFromMedia(): void {
+  const mediaElement = getActivePreviewElement();
+  if (!mediaElement) {
+    return;
+  }
+
+  setActivePlaybackSegmentForSeconds(mediaElement.currentTime);
+}
+
 function clearCaptionRangeSelection(): void {
   captionRangeAnchorIndex = null;
   captionRangeFocusIndex = null;
@@ -800,7 +953,9 @@ function renderCaptionSegments(): void {
       "is-in-range",
       rangeStartIndex !== null && rangeEndIndex !== null && segment.index >= rangeStartIndex && segment.index <= rangeEndIndex
     );
+    row.classList.toggle("is-playback-active", activePlaybackSegmentIndex === segment.index);
     row.addEventListener("click", () => {
+      seekMediaToTimestamp(segment.start);
       selectCaptionSegment(segment);
     });
 
@@ -833,6 +988,7 @@ function setCaptionSegments(segments: CaptionSegment[]): void {
     captionRangeAnchorIndex = null;
     captionRangeFocusIndex = null;
     captionRangeComplete = false;
+    activePlaybackSegmentIndex = null;
   }
 
   captionSegments = segments;
@@ -1067,6 +1223,13 @@ document.addEventListener("keydown", (event) => {
 
   clearCaptionRangeSelection();
 });
+
+previewVideoNode.addEventListener("timeupdate", updateActivePlaybackSegmentFromMedia);
+previewAudioNode.addEventListener("timeupdate", updateActivePlaybackSegmentFromMedia);
+previewVideoNode.addEventListener("seeked", updateActivePlaybackSegmentFromMedia);
+previewAudioNode.addEventListener("seeked", updateActivePlaybackSegmentFromMedia);
+previewVideoNode.addEventListener("ended", clearActivePlaybackSegment);
+previewAudioNode.addEventListener("ended", clearActivePlaybackSegment);
 
 copyLogButton.addEventListener("click", async () => {
   const text = logPanel.textContent ?? "";
