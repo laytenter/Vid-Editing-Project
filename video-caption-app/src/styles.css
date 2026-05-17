@@ -164,6 +164,63 @@ button:disabled {
   margin-right: 8px;
 }
 
+.caption-segments-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.caption-segments-count {
+  color: #4f5973;
+  font-size: 0.9rem;
+}
+
+.caption-segments-list {
+  display: grid;
+  gap: 6px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.caption-segments-empty {
+  margin: 0;
+  color: #6d7385;
+}
+
+.caption-segment-row {
+  display: grid;
+  grid-template-columns: minmax(9rem, 12rem) minmax(0, 1fr);
+  gap: 12px;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #d9d9df;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1f1f1f;
+  text-align: left;
+}
+
+.caption-segment-row:hover {
+  border-color: #3f63dd;
+  background: #f5f7ff;
+}
+
+.caption-segment-time {
+  display: grid;
+  gap: 3px;
+  color: #3150c8;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 0.88rem;
+  white-space: nowrap;
+}
+
+.caption-segment-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 pre {
   margin: 0;
   background: #12141a;
@@ -203,5 +260,9 @@ pre {
 
   .section-header {
     flex-direction: column;
+  }
+
+  .caption-segment-row {
+    grid-template-columns: 1fr;
   }
 }

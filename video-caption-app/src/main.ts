@@ -8,7 +8,7 @@
   SaveDialogReturnValue
 } from "electron";
 import { spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import Store from "electron-store";
 import type {
@@ -608,6 +608,8 @@ app.whenReady().then(() => {
       throw new Error("Whisper finished without producing expected SRT/VTT files");
     }
 
+    const srtText = readFileSync(tempSrtPath, "utf8");
+
     let srtPath = tempSrtPath;
     let vttPath = tempVttPath;
     const settings = getPersistedSettings();
@@ -624,7 +626,7 @@ app.whenReady().then(() => {
       vttPath = copiedVttPath;
     }
 
-    return { srtPath, vttPath, modelPath };
+    return { srtPath, vttPath, modelPath, srtText };
   });
 
   ipcMain.handle("save-file-as", async (event, request: SaveFileAsRequest): Promise<string | null> => {

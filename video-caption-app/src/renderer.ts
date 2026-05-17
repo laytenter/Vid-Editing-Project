@@ -20,6 +20,8 @@ const generateCaptionsButton = mustGet<HTMLButtonElement>("generateCaptionsButto
 const saveSrtButton = mustGet<HTMLButtonElement>("saveSrtButton");
 const saveVttButton = mustGet<HTMLButtonElement>("saveVttButton");
 const captionSourceStatusNode = mustGet<HTMLElement>("captionSourceStatus");
+const captionSegmentsCountNode = mustGet<HTMLElement>("captionSegmentsCount");
+const captionSegmentListNode = mustGet<HTMLElement>("captionSegmentList");
 
 const selectedVideoPathNode = mustGet<HTMLElement>("selectedVideoPath");
 const audioPathNode = mustGet<HTMLElement>("audioPath");
@@ -69,9 +71,17 @@ interface StoredLogEntry {
   ts: number;
 }
 
+interface CaptionSegment {
+  index: number;
+  start: string;
+  end: string;
+  text: string;
+}
+
 const logEntries: StoredLogEntry[] = [];
 const maxLogEntries = 5000;
 let logRenderScheduled = false;
+let captionSegments: CaptionSegment[] = [];
 
 function isSupportedVideoPath(filePath: string): boolean {
   const extensionMatch = filePath.toLowerCase().match(/\.([^.\\/]+)$/);
@@ -245,6 +255,108 @@ function splitMessageLines(message: string): string[] {
     .filter((line) => line.length > 0);
 }
 
+function normalizeCaptionTime(value: string): string {
+  return value.replace(",", ".");
+}
+
+function getCaptionPreview(text: string): string {
+  return text.length <= 120 ? text : `${text.slice(0, 117).trimEnd()}...`;
+}
+
+function parseSrtSegments(srtText: string): CaptionSegment[] {
+  const normalizedText = srtText.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+  if (normalizedText === "") {
+    return [];
+  }
+
+  const segments: CaptionSegment[] = [];
+  const blocks = normalizedText.split(/\n{2,}/);
+
+  for (const block of blocks) {
+    const lines = block
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+    const timingLineIndex = lines.findIndex((line) => line.includes("-->"));
+
+    if (timingLineIndex < 0) {
+      continue;
+    }
+
+    const timingMatch = lines[timingLineIndex].match(
+      /(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,.]\d{3})/
+    );
+
+    if (!timingMatch) {
+      continue;
+    }
+
+    const text = lines.slice(timingLineIndex + 1).join(" ").trim();
+    segments.push({
+      index: segments.length + 1,
+      start: normalizeCaptionTime(timingMatch[1]),
+      end: normalizeCaptionTime(timingMatch[2]),
+      text: text || "(no text)"
+    });
+  }
+
+  return segments;
+}
+
+function renderCaptionSegments(): void {
+  const captionLabel = captionSegments.length === 1 ? "caption" : "captions";
+  captionSegmentsCountNode.textContent = `${captionSegments.length} ${captionLabel}`;
+  captionSegmentListNode.replaceChildren();
+
+  if (captionSegments.length === 0) {
+    const emptyNode = document.createElement("p");
+    emptyNode.className = "caption-segments-empty";
+    emptyNode.textContent = "Generate captions to see segments.";
+    captionSegmentListNode.appendChild(emptyNode);
+    return;
+  }
+
+  for (const segment of captionSegments) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "caption-segment-row";
+    row.addEventListener("click", (event) => {
+      if (event.shiftKey && clipStartInput.value.trim() !== "") {
+        clipEndInput.value = segment.end;
+        appendLog("Clip end extended to caption segment.");
+        return;
+      }
+
+      clipStartInput.value = segment.start;
+      clipEndInput.value = segment.end;
+      appendLog("Clip range set from caption segment.");
+    });
+
+    const timeNode = document.createElement("span");
+    timeNode.className = "caption-segment-time";
+
+    const startNode = document.createElement("span");
+    startNode.textContent = segment.start;
+
+    const endNode = document.createElement("span");
+    endNode.textContent = segment.end;
+
+    const textNode = document.createElement("span");
+    textNode.className = "caption-segment-text";
+    textNode.textContent = getCaptionPreview(segment.text);
+    textNode.title = segment.text;
+
+    timeNode.append(startNode, endNode);
+    row.append(timeNode, textNode);
+    captionSegmentListNode.appendChild(row);
+  }
+}
+
+function setCaptionSegments(segments: CaptionSegment[]): void {
+  captionSegments = segments;
+  renderCaptionSegments();
+}
+
 function renderLogPanel(): void {
   const filterValue = (logFilterSelect.value as LogFilter) || "all";
   const showRawLogs = showRawLogsCheckbox.checked;
@@ -362,6 +474,7 @@ function applySelectedVideo(videoPath: string): void {
   srtPath = null;
   vttPath = null;
   audioSourceKind = null;
+  setCaptionSegments([]);
 
   refreshPaths();
   syncButtons();
@@ -373,6 +486,7 @@ function applySelectedAudio(nextAudioPath: string): void {
   srtPath = null;
   vttPath = null;
   audioSourceKind = "uploaded";
+  setCaptionSegments([]);
 
   refreshPaths();
   syncButtons();
@@ -719,6 +833,7 @@ extractAudioButton.addEventListener("click", async () => {
     srtPath = null;
     vttPath = null;
     audioSourceKind = "extracted";
+    setCaptionSegments([]);
 
     refreshPaths();
     syncButtons();
@@ -739,6 +854,7 @@ generateCaptionsButton.addEventListener("click", async () => {
 
   setBusy(true);
   appendLog("Starting whisper caption generation...");
+  setCaptionSegments([]);
 
   try {
     const result = await window.videoTools.runWhisper({
@@ -747,6 +863,7 @@ generateCaptionsButton.addEventListener("click", async () => {
     });
     srtPath = result.srtPath;
     vttPath = result.vttPath;
+    setCaptionSegments(parseSrtSegments(result.srtText));
 
     refreshPaths();
     syncButtons();
@@ -817,6 +934,7 @@ async function initSettingsPanel(): Promise<void> {
 }
 
 refreshPaths();
+renderCaptionSegments();
 syncButtons();
 appendLog("Ready.");
 void initSettingsPanel();

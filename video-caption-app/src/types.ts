@@ -27,6 +27,7 @@ export interface RunWhisperResult {
   srtPath: string;
   vttPath: string;
   modelPath: string;
+  srtText: string;
 }
 
 export type ClipMode = "copy" | "encode";
