@@ -97,6 +97,7 @@ interface CaptionSegment {
   start: string;
   end: string;
   text: string;
+  edited?: boolean;
 }
 
 interface ActiveAction {
@@ -128,6 +129,7 @@ let captionRangeAnchorIndex: number | null = null;
 let captionRangeFocusIndex: number | null = null;
 let captionRangeComplete = false;
 let activePlaybackSegmentIndex: number | null = null;
+let editingCaptionIndex: number | null = null;
 let currentPreviewKind: "video" | "audio" | null = null;
 let currentPreviewUrl: string | null = null;
 
@@ -804,6 +806,39 @@ function selectCaptionSegment(segment: CaptionSegment): void {
   appendLog("Clip range set from caption segments.");
 }
 
+function startCaptionEdit(segment: CaptionSegment): void {
+  editingCaptionIndex = segment.index;
+  renderCaptionSegments();
+}
+
+function cancelCaptionEdit(): void {
+  if (editingCaptionIndex === null) {
+    return;
+  }
+
+  editingCaptionIndex = null;
+  renderCaptionSegments();
+}
+
+function saveCaptionEdit(index: number, text: string): void {
+  const segment = findCaptionSegment(index);
+  if (!segment) {
+    editingCaptionIndex = null;
+    renderCaptionSegments();
+    return;
+  }
+
+  const normalizedText = text.trim() || "(no text)";
+  if (segment.text !== normalizedText) {
+    segment.text = normalizedText;
+    segment.edited = true;
+    appendLog("Caption text updated.");
+  }
+
+  editingCaptionIndex = null;
+  renderCaptionSegments();
+}
+
 function handleLiveWhisperCaptionLine(line: string): void {
   const segment = parseWhisperCaptionLine(line);
   if (!segment) {
@@ -890,6 +925,40 @@ function syncRawLogVisibility(): void {
 
 function normalizeCaptionTime(value: string): string {
   return value.replace(",", ".");
+}
+
+function formatSrtTimestamp(timestamp: string): string {
+  return timestamp.replace(".", ",");
+}
+
+function formatVttTimestamp(timestamp: string): string {
+  return timestamp.replace(",", ".");
+}
+
+function regenerateSrtFromSegments(): string {
+  if (captionSegments.length === 0) {
+    return "";
+  }
+
+  return `${captionSegments
+    .map((segment, index) => {
+      const text = segment.text.trim() || "(no text)";
+      return `${index + 1}\n${formatSrtTimestamp(segment.start)} --> ${formatSrtTimestamp(segment.end)}\n${text}`;
+    })
+    .join("\n\n")}\n`;
+}
+
+function regenerateVttFromSegments(): string {
+  if (captionSegments.length === 0) {
+    return "WEBVTT\n";
+  }
+
+  return `WEBVTT\n\n${captionSegments
+    .map((segment) => {
+      const text = segment.text.trim() || "(no text)";
+      return `${formatVttTimestamp(segment.start)} --> ${formatVttTimestamp(segment.end)}\n${text}`;
+    })
+    .join("\n\n")}\n`;
 }
 
 function getCaptionPreview(text: string): string {
@@ -1033,9 +1102,10 @@ function renderCaptionSegments(): void {
   }
 
   for (const segment of visibleSegments) {
-    const row = document.createElement("button");
-    row.type = "button";
+    const row = document.createElement("div");
     row.className = "caption-segment-row";
+    row.tabIndex = 0;
+    row.setAttribute("role", "button");
     row.classList.toggle("is-range-start", rangeStartIndex !== null && segment.index === rangeStartIndex);
     row.classList.toggle("is-range-end", rangeEndIndex !== null && segment.index === rangeEndIndex);
     row.classList.toggle(
@@ -1043,9 +1113,22 @@ function renderCaptionSegments(): void {
       rangeStartIndex !== null && rangeEndIndex !== null && segment.index >= rangeStartIndex && segment.index <= rangeEndIndex
     );
     row.classList.toggle("is-playback-active", activePlaybackSegmentIndex === segment.index);
-    row.addEventListener("click", () => {
+    row.classList.toggle("is-edited", segment.edited === true);
+    row.classList.toggle("is-editing", editingCaptionIndex === segment.index);
+
+    const activateSegment = () => {
       seekMediaToTimestamp(segment.start);
       selectCaptionSegment(segment);
+    };
+
+    row.addEventListener("click", activateSegment);
+    row.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") {
+        return;
+      }
+
+      event.preventDefault();
+      activateSegment();
     });
 
     const timeNode = document.createElement("span");
@@ -1057,13 +1140,79 @@ function renderCaptionSegments(): void {
     const endNode = document.createElement("span");
     endNode.textContent = segment.end;
 
+    timeNode.append(startNode, endNode);
+
+    if (editingCaptionIndex === segment.index) {
+      const editorNode = document.createElement("textarea");
+      editorNode.className = "caption-segment-editor";
+      editorNode.value = segment.text;
+      editorNode.setAttribute("aria-label", "Edit caption text");
+      let finished = false;
+
+      editorNode.addEventListener("click", (event) => {
+        event.stopPropagation();
+      });
+      editorNode.addEventListener("keydown", (event) => {
+        event.stopPropagation();
+
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+          finished = true;
+          saveCaptionEdit(segment.index, editorNode.value);
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          finished = true;
+          cancelCaptionEdit();
+        }
+      });
+      editorNode.addEventListener("blur", () => {
+        if (!finished) {
+          finished = true;
+          saveCaptionEdit(segment.index, editorNode.value);
+        }
+      });
+
+      row.append(timeNode, editorNode);
+      captionSegmentListNode.appendChild(row);
+
+      window.requestAnimationFrame(() => {
+        editorNode.focus();
+        editorNode.select();
+      });
+      continue;
+    }
+
     const textNode = document.createElement("span");
     textNode.className = "caption-segment-text";
     appendHighlightedText(textNode, getCaptionPreview(segment.text), searchQuery);
     textNode.title = segment.text;
+    textNode.addEventListener("dblclick", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      startCaptionEdit(segment);
+    });
 
-    timeNode.append(startNode, endNode);
-    row.append(timeNode, textNode);
+    if (segment.edited) {
+      const editedNode = document.createElement("span");
+      editedNode.className = "caption-edited-dot";
+      editedNode.title = "Edited";
+      editedNode.setAttribute("aria-label", "Edited");
+      textNode.appendChild(editedNode);
+    }
+
+    const editButton = document.createElement("button");
+    editButton.type = "button";
+    editButton.className = "caption-segment-edit";
+    editButton.textContent = "Edit";
+    editButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      startCaptionEdit(segment);
+    });
+    editButton.addEventListener("keydown", (event) => {
+      event.stopPropagation();
+    });
+
+    row.append(timeNode, textNode, editButton);
     captionSegmentListNode.appendChild(row);
   }
 
@@ -1078,6 +1227,7 @@ function setCaptionSegments(segments: CaptionSegment[]): void {
     captionRangeFocusIndex = null;
     captionRangeComplete = false;
     activePlaybackSegmentIndex = null;
+    editingCaptionIndex = null;
   }
 
   captionSegments = segments;
@@ -1813,11 +1963,19 @@ saveSrtButton.addEventListener("click", async () => {
   setBusy(true);
 
   try {
-    const savedPath = await window.videoTools.saveFileAs({
-      sourcePath: srtPath,
-      defaultFileName: "captions.srt",
-      mediaPath: getCaptionContextPath()
-    });
+    const savedPath =
+      captionSegments.length > 0
+        ? await window.videoTools.saveTextAs({
+            content: regenerateSrtFromSegments(),
+            defaultFileName: "captions.srt",
+            mediaPath: getCaptionContextPath(),
+            extension: "srt"
+          })
+        : await window.videoTools.saveFileAs({
+            sourcePath: srtPath,
+            defaultFileName: "captions.srt",
+            mediaPath: getCaptionContextPath()
+          });
 
     appendLog(savedPath ? `Saved SRT to: ${savedPath}` : "SRT save cancelled.");
   } catch (error) {
@@ -1835,11 +1993,19 @@ saveVttButton.addEventListener("click", async () => {
   setBusy(true);
 
   try {
-    const savedPath = await window.videoTools.saveFileAs({
-      sourcePath: vttPath,
-      defaultFileName: "captions.vtt",
-      mediaPath: getCaptionContextPath()
-    });
+    const savedPath =
+      captionSegments.length > 0
+        ? await window.videoTools.saveTextAs({
+            content: regenerateVttFromSegments(),
+            defaultFileName: "captions.vtt",
+            mediaPath: getCaptionContextPath(),
+            extension: "vtt"
+          })
+        : await window.videoTools.saveFileAs({
+            sourcePath: vttPath,
+            defaultFileName: "captions.vtt",
+            mediaPath: getCaptionContextPath()
+          });
 
     appendLog(savedPath ? `Saved VTT to: ${savedPath}` : "VTT save cancelled.");
   } catch (error) {

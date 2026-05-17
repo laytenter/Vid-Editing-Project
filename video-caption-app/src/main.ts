@@ -8,7 +8,7 @@
   SaveDialogReturnValue
 } from "electron";
 import { spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import Store from "electron-store";
 import type {
@@ -19,6 +19,7 @@ import type {
   RunWhisperRequest,
   RunWhisperResult,
   SaveFileAsRequest,
+  SaveTextAsRequest,
   ToolLogEntry
 } from "./types";
 
@@ -663,6 +664,45 @@ app.whenReady().then(() => {
     }
 
     copyFileSync(sourcePath, destinationPath);
+    return destinationPath;
+  });
+
+  ipcMain.handle("save-text-as", async (event, request: SaveTextAsRequest): Promise<string | null> => {
+    if (typeof request?.content !== "string") {
+      throw new Error("content must be a string");
+    }
+
+    if (typeof request?.defaultFileName !== "string" || request.defaultFileName.trim() === "") {
+      throw new Error("defaultFileName must be a non-empty string");
+    }
+
+    if (request.extension !== "srt" && request.extension !== "vtt") {
+      throw new Error("extension must be srt or vtt");
+    }
+
+    const extension = `.${request.extension}`;
+    const defaultDirectory = resolveDefaultSaveDirectory(request.mediaPath);
+    const filter =
+      request.extension === "srt"
+        ? { name: "SubRip (.srt)", extensions: ["srt"] }
+        : { name: "WebVTT (.vtt)", extensions: ["vtt"] };
+
+    const saveResult = await showSaveDialogForSender(event, {
+      title: "Save Captions As",
+      defaultPath: path.resolve(defaultDirectory, request.defaultFileName.trim()),
+      filters: [filter]
+    });
+
+    if (saveResult.canceled || !saveResult.filePath) {
+      return null;
+    }
+
+    let destinationPath = path.resolve(saveResult.filePath);
+    if (path.extname(destinationPath).toLowerCase() === "") {
+      destinationPath += extension;
+    }
+
+    writeFileSync(destinationPath, request.content, "utf8");
     return destinationPath;
   });
 

@@ -400,7 +400,8 @@ button:disabled {
 
 .caption-segment-row {
   display: grid;
-  grid-template-columns: minmax(9rem, 12rem) minmax(0, 1fr);
+  grid-template-columns: minmax(9rem, 12rem) minmax(0, 1fr) auto;
+  align-items: start;
   gap: 12px;
   width: 100%;
   padding: 10px;
@@ -408,12 +409,19 @@ button:disabled {
   border-radius: 8px;
   background: #ffffff;
   color: #1f1f1f;
+  cursor: pointer;
+  font: inherit;
   text-align: left;
 }
 
 .caption-segment-row:hover {
   border-color: #3f63dd;
   background: #f5f7ff;
+}
+
+.caption-segment-row:focus-visible {
+  outline: 2px solid #3150c8;
+  outline-offset: 2px;
 }
 
 .caption-segment-row.is-in-range {
@@ -437,6 +445,14 @@ button:disabled {
   outline-offset: -2px;
 }
 
+.caption-segment-row.is-edited {
+  border-left-color: #1f8f5f;
+}
+
+.caption-segment-row.is-editing {
+  cursor: default;
+}
+
 .caption-segment-time {
   display: grid;
   gap: 3px;
@@ -449,6 +465,40 @@ button:disabled {
 .caption-segment-text {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.caption-edited-dot {
+  display: inline-block;
+  width: 0.45rem;
+  height: 0.45rem;
+  margin-left: 0.4rem;
+  border-radius: 999px;
+  background: #1f8f5f;
+  vertical-align: middle;
+}
+
+.caption-segment-edit {
+  padding: 5px 9px;
+  border-color: #d9d9df;
+  background: #ffffff;
+  color: #3150c8;
+  font-size: 0.82rem;
+}
+
+.caption-segment-editor {
+  min-width: 0;
+  width: 100%;
+  min-height: 4.25rem;
+  padding: 8px;
+  border: 1px solid #9fb1ff;
+  border-radius: 6px;
+  color: #1f1f1f;
+  font: inherit;
+  resize: vertical;
+}
+
+.caption-segment-row.is-editing .caption-segment-editor {
+  grid-column: 2 / -1;
 }
 
 .caption-segment-text mark {
@@ -533,6 +583,10 @@ pre {
 
   .caption-segment-row {
     grid-template-columns: 1fr;
+  }
+
+  .caption-segment-row.is-editing .caption-segment-editor {
+    grid-column: 1;
   }
 
   .queued-clips-header,

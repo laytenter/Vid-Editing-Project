@@ -8,6 +8,7 @@ import type {
   RunWhisperRequest,
   RunWhisperResult,
   SaveFileAsRequest,
+  SaveTextAsRequest,
   ToolLogEntry
 } from "./types";
 
@@ -57,6 +58,9 @@ const videoToolsApi = {
   },
   saveFileAs: (request: SaveFileAsRequest): Promise<string | null> => {
     return ipcRenderer.invoke("save-file-as", request);
+  },
+  saveTextAs: (request: SaveTextAsRequest): Promise<string | null> => {
+    return ipcRenderer.invoke("save-text-as", request);
   },
   onToolLog: (callback: (entry: ToolLogEntry) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, entry: ToolLogEntry) => {

@@ -50,3 +50,10 @@ export interface SaveFileAsRequest {
   defaultFileName?: string;
   mediaPath?: string | null;
 }
+
+export interface SaveTextAsRequest {
+  content: string;
+  defaultFileName: string;
+  mediaPath?: string | null;
+  extension: "srt" | "vtt";
+}
