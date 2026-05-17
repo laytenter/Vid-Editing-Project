@@ -2,10 +2,12 @@
   outputDir: string | null;
   saveWavToOutputDir: boolean;
   saveCaptionsToOutputDir: boolean;
+  themeMode: ThemeMode;
   documentsDir: string;
 };
 
 type AudioSourceKind = "uploaded" | "extracted" | null;
+type ThemeMode = "system" | "dark" | "light";
 
 function mustGet<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -45,6 +47,7 @@ const outputDirLabel = mustGet<HTMLElement>("outputDirLabel");
 const chooseOutputDirButton = mustGet<HTMLButtonElement>("chooseOutputDirButton");
 const openOutputDirButton = mustGet<HTMLButtonElement>("openOutputDirButton");
 const openTempFolderButton = mustGet<HTMLButtonElement>("openTempFolderButton");
+const themeSelect = mustGet<HTMLSelectElement>("themeSelect");
 const saveWavCheckbox = mustGet<HTMLInputElement>("saveWavCheckbox");
 const saveCaptionsCheckbox = mustGet<HTMLInputElement>("saveCaptionsCheckbox");
 const dropZone = mustGet<HTMLDivElement>("dropZone");
@@ -71,12 +74,14 @@ let audioSourceKind: AudioSourceKind = null;
 let isBusy = false;
 let settingsBusy = false;
 let currentSettings: AppSettings | null = null;
+let currentThemeMode: ThemeMode = "system";
 
 const allowedVideoExtensions = new Set(["mp4", "mov", "mkv", "avi", "webm", "m4v"]);
 const allowedAudioExtensions = new Set(["wav", "mp3", "m4a", "aac", "flac", "ogg", "opus", "wma", "aiff", "aif"]);
 
 showRawLogsCheckbox.checked = false;
 logFilterSelect.value = "all";
+themeSelect.value = "system";
 
 type ToolName = "ffmpeg" | "whisper";
 type StreamName = "stdout" | "stderr";
@@ -176,11 +181,25 @@ function syncButtons(): void {
   chooseOutputDirButton.disabled = isBusy || settingsBusy;
   openOutputDirButton.disabled = isBusy || settingsBusy;
   openTempFolderButton.disabled = isBusy || settingsBusy;
+  themeSelect.disabled = isBusy || settingsBusy;
   saveWavCheckbox.disabled = isBusy || settingsBusy;
   saveCaptionsCheckbox.disabled = isBusy || settingsBusy;
   clipCreateButton.disabled = isBusy || !selectedVideoPath;
   clipAddRangeButton.disabled = isBusy || !selectedVideoPath;
   queuedClipsExportButton.disabled = isBusy || queuedClips.length === 0;
+}
+
+const systemThemeMedia = window.matchMedia("(prefers-color-scheme: dark)");
+
+function normalizeThemeMode(value: string): ThemeMode {
+  return value === "dark" || value === "light" || value === "system" ? value : "system";
+}
+
+function applyThemeMode(themeMode: ThemeMode): void {
+  currentThemeMode = themeMode;
+  const resolvedTheme = themeMode === "system" ? (systemThemeMedia.matches ? "dark" : "light") : themeMode;
+  document.documentElement.dataset.theme = resolvedTheme;
+  document.documentElement.dataset.themeMode = themeMode;
 }
 
 function getDirectoryFromPath(filePath: string): string | null {
@@ -1366,6 +1385,8 @@ function appendLog(message: string): void {
 function renderSettings(settings: AppSettings): void {
   currentSettings = settings;
   updateOutputDirLabel();
+  themeSelect.value = settings.themeMode;
+  applyThemeMode(settings.themeMode);
   saveWavCheckbox.checked = settings.saveWavToOutputDir;
   saveCaptionsCheckbox.checked = settings.saveCaptionsToOutputDir;
 }
@@ -1480,6 +1501,12 @@ window.addEventListener("unhandledrejection", (event) => {
 showRawLogsCheckbox.addEventListener("change", () => {
   syncRawLogVisibility();
   scheduleLogPanelRender();
+});
+
+systemThemeMedia.addEventListener("change", () => {
+  if (currentThemeMode === "system") {
+    applyThemeMode("system");
+  }
 });
 
 logFilterSelect.addEventListener("change", () => {
@@ -1745,6 +1772,24 @@ openTempFolderButton.addEventListener("click", async () => {
     appendLog(ok ? "Opened temp folder." : "Could not open temp folder.");
   } catch (error) {
     appendLog(`Open temp folder failed: ${(error as Error).message}`);
+  } finally {
+    setSettingsBusy(false);
+  }
+});
+
+themeSelect.addEventListener("change", async () => {
+  const themeMode = normalizeThemeMode(themeSelect.value);
+  applyThemeMode(themeMode);
+  setSettingsBusy(true);
+
+  try {
+    const settings = await window.videoTools.setSettings({
+      themeMode
+    });
+    renderSettings(settings);
+  } catch (error) {
+    appendLog(`Update setting failed: ${(error as Error).message}`);
+    await refreshSettings();
   } finally {
     setSettingsBusy(false);
   }
@@ -2028,6 +2073,7 @@ async function initSettingsPanel(): Promise<void> {
 }
 
 setIdleActionStatus();
+applyThemeMode("system");
 syncRawLogVisibility();
 refreshPaths();
 renderCaptionSegments();

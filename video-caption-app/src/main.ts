@@ -45,7 +45,8 @@ const settingsStore = new Store<PersistedSettings>({
   defaults: {
     outputDir: null,
     saveWavToOutputDir: true,
-    saveCaptionsToOutputDir: false
+    saveCaptionsToOutputDir: false,
+    themeMode: "system"
   }
 });
 
@@ -100,11 +101,15 @@ function getPersistedSettings(): PersistedSettings {
   const outputDirValue = settingsStore.get("outputDir");
   const outputDir =
     typeof outputDirValue === "string" && outputDirValue.trim() !== "" ? path.resolve(outputDirValue) : null;
+  const themeModeValue = settingsStore.get("themeMode");
+  const themeMode =
+    themeModeValue === "dark" || themeModeValue === "light" || themeModeValue === "system" ? themeModeValue : "system";
 
   return {
     outputDir,
     saveWavToOutputDir: settingsStore.get("saveWavToOutputDir") !== false,
-    saveCaptionsToOutputDir: settingsStore.get("saveCaptionsToOutputDir") === true
+    saveCaptionsToOutputDir: settingsStore.get("saveCaptionsToOutputDir") === true,
+    themeMode
   };
 }
 
@@ -131,6 +136,10 @@ function updatePersistedSettings(partial: Partial<PersistedSettings>): Persisted
 
   if (typeof partial.saveCaptionsToOutputDir === "boolean") {
     settingsStore.set("saveCaptionsToOutputDir", partial.saveCaptionsToOutputDir);
+  }
+
+  if (partial.themeMode === "system" || partial.themeMode === "dark" || partial.themeMode === "light") {
+    settingsStore.set("themeMode", partial.themeMode);
   }
 
   return getPersistedSettings();
