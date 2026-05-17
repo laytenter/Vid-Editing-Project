@@ -24,6 +24,8 @@ const captionSegmentsCountNode = mustGet<HTMLElement>("captionSegmentsCount");
 const captionSegmentListNode = mustGet<HTMLElement>("captionSegmentList");
 const captionSelectionSummaryNode = mustGet<HTMLElement>("captionSelectionSummary");
 const captionClearSelectionButton = mustGet<HTMLButtonElement>("captionClearSelectionButton");
+const captionSearchInput = mustGet<HTMLInputElement>("captionSearchInput");
+const captionSearchCountNode = mustGet<HTMLElement>("captionSearchCount");
 const previewStatusNode = mustGet<HTMLElement>("previewStatus");
 const previewVideoNode = mustGet<HTMLVideoElement>("previewVideo");
 const previewAudioNode = mustGet<HTMLAudioElement>("previewAudio");
@@ -894,6 +896,34 @@ function getCaptionPreview(text: string): string {
   return text.length <= 120 ? text : `${text.slice(0, 117).trimEnd()}...`;
 }
 
+function appendHighlightedText(parent: HTMLElement, text: string, query: string): void {
+  if (query === "") {
+    parent.textContent = text;
+    return;
+  }
+
+  const lowerText = text.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  let cursor = 0;
+  let matchIndex = lowerText.indexOf(lowerQuery, cursor);
+
+  while (matchIndex >= 0) {
+    if (matchIndex > cursor) {
+      parent.appendChild(document.createTextNode(text.slice(cursor, matchIndex)));
+    }
+
+    const markNode = document.createElement("mark");
+    markNode.textContent = text.slice(matchIndex, matchIndex + query.length);
+    parent.appendChild(markNode);
+    cursor = matchIndex + query.length;
+    matchIndex = lowerText.indexOf(lowerQuery, cursor);
+  }
+
+  if (cursor < text.length) {
+    parent.appendChild(document.createTextNode(text.slice(cursor)));
+  }
+}
+
 function getShortCaptionPreview(text: string): string {
   return text.length <= 72 ? text : `${text.slice(0, 69).trimEnd()}...`;
 }
@@ -967,6 +997,14 @@ function renderCaptionSegments(): void {
   const captionLabel = captionSegments.length === 1 ? "caption" : "captions";
   captionSegmentsCountNode.textContent = `${captionSegments.length} ${captionLabel}`;
   captionSegmentListNode.replaceChildren();
+  const searchQuery = captionSearchInput.value.trim();
+  const lowerSearchQuery = searchQuery.toLowerCase();
+  const visibleSegments =
+    lowerSearchQuery === ""
+      ? captionSegments
+      : captionSegments.filter((segment) => segment.text.toLowerCase().includes(lowerSearchQuery));
+  captionSearchCountNode.textContent =
+    lowerSearchQuery === "" ? "" : `${visibleSegments.length} ${visibleSegments.length === 1 ? "match" : "matches"}`;
   const rangeStartIndex =
     captionRangeAnchorIndex !== null && captionRangeFocusIndex !== null
       ? Math.min(captionRangeAnchorIndex, captionRangeFocusIndex)
@@ -985,7 +1023,16 @@ function renderCaptionSegments(): void {
     return;
   }
 
-  for (const segment of captionSegments) {
+  if (visibleSegments.length === 0) {
+    const emptyNode = document.createElement("p");
+    emptyNode.className = "caption-segments-empty";
+    emptyNode.textContent = "No matching captions.";
+    captionSegmentListNode.appendChild(emptyNode);
+    renderCaptionSelectionSummary();
+    return;
+  }
+
+  for (const segment of visibleSegments) {
     const row = document.createElement("button");
     row.type = "button";
     row.className = "caption-segment-row";
@@ -1012,7 +1059,7 @@ function renderCaptionSegments(): void {
 
     const textNode = document.createElement("span");
     textNode.className = "caption-segment-text";
-    textNode.textContent = getCaptionPreview(segment.text);
+    appendHighlightedText(textNode, getCaptionPreview(segment.text), searchQuery);
     textNode.title = segment.text;
 
     timeNode.append(startNode, endNode);
@@ -1303,8 +1350,21 @@ captionClearSelectionButton.addEventListener("click", () => {
   clearCaptionRangeSelection();
 });
 
+captionSearchInput.addEventListener("input", () => {
+  renderCaptionSegments();
+});
+
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") {
+    return;
+  }
+
+  if (document.activeElement === captionSearchInput) {
+    if (captionSearchInput.value !== "") {
+      captionSearchInput.value = "";
+      renderCaptionSegments();
+      event.preventDefault();
+    }
     return;
   }
 

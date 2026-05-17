@@ -270,6 +270,27 @@ button:disabled {
   font-size: 0.9rem;
 }
 
+.caption-search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.caption-search-row input {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #d9d9df;
+  border-radius: 8px;
+}
+
+.caption-search-count {
+  color: #4f5973;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
 .queued-clips-panel {
   display: grid;
   gap: 10px;
@@ -428,6 +449,13 @@ button:disabled {
 .caption-segment-text {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.caption-segment-text mark {
+  border-radius: 3px;
+  background: #fff1a8;
+  color: inherit;
+  padding: 0 1px;
 }
 
 pre {
