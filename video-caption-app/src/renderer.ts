@@ -22,6 +22,8 @@ const saveVttButton = mustGet<HTMLButtonElement>("saveVttButton");
 const captionSourceStatusNode = mustGet<HTMLElement>("captionSourceStatus");
 const captionSegmentsCountNode = mustGet<HTMLElement>("captionSegmentsCount");
 const captionSegmentListNode = mustGet<HTMLElement>("captionSegmentList");
+const captionSelectionSummaryNode = mustGet<HTMLElement>("captionSelectionSummary");
+const captionClearSelectionButton = mustGet<HTMLButtonElement>("captionClearSelectionButton");
 const actionStatusNode = mustGet<HTMLElement>("actionStatus");
 const actionProgressTrackNode = mustGet<HTMLElement>("actionProgressTrack");
 const actionProgressBarNode = mustGet<HTMLElement>("actionProgressBar");
@@ -103,6 +105,7 @@ let whisperStdoutBuffer = "";
 let captionSegmentUserScrolledUp = false;
 let captionRangeAnchorIndex: number | null = null;
 let captionRangeFocusIndex: number | null = null;
+let captionRangeComplete = false;
 
 function isSupportedVideoPath(filePath: string): boolean {
   const extensionMatch = filePath.toLowerCase().match(/\.([^.\\/]+)$/);
@@ -535,6 +538,100 @@ function scrollCaptionSegmentsToBottom(): void {
   captionSegmentListNode.scrollTop = captionSegmentListNode.scrollHeight;
 }
 
+function findCaptionSegment(index: number | null): CaptionSegment | null {
+  if (index === null) {
+    return null;
+  }
+
+  return captionSegments.find((segment) => segment.index === index) ?? null;
+}
+
+function clearCaptionRangeSelection(): void {
+  captionRangeAnchorIndex = null;
+  captionRangeFocusIndex = null;
+  captionRangeComplete = false;
+  renderCaptionSegments();
+}
+
+function renderCaptionSelectionSummary(): void {
+  const anchorSegment = findCaptionSegment(captionRangeAnchorIndex);
+  const focusSegment = findCaptionSegment(captionRangeFocusIndex);
+  captionClearSelectionButton.hidden = !anchorSegment;
+
+  if (!anchorSegment) {
+    captionSelectionSummaryNode.hidden = true;
+    captionSelectionSummaryNode.replaceChildren();
+    return;
+  }
+
+  captionSelectionSummaryNode.hidden = false;
+  captionSelectionSummaryNode.replaceChildren();
+
+  const titleNode = document.createElement("div");
+  titleNode.className = "caption-selection-title";
+  const detailNode = document.createElement("div");
+  detailNode.className = "caption-selection-detail";
+
+  if (!captionRangeComplete || !focusSegment) {
+    titleNode.textContent = `Start: ${anchorSegment.start} - ${getShortCaptionPreview(anchorSegment.text)}`;
+    detailNode.textContent = "Click another segment to set the end.";
+  } else {
+    const startSegment = anchorSegment.index <= focusSegment.index ? anchorSegment : focusSegment;
+    const endSegment = anchorSegment.index <= focusSegment.index ? focusSegment : anchorSegment;
+    titleNode.textContent = `Range: ${startSegment.start} -> ${endSegment.end}`;
+    detailNode.textContent = `${getShortCaptionPreview(startSegment.text)} / ${getShortCaptionPreview(endSegment.text)}`;
+  }
+
+  captionSelectionSummaryNode.append(titleNode, detailNode);
+}
+
+function selectCaptionSegment(segment: CaptionSegment): void {
+  if (captionRangeAnchorIndex === null || captionRangeComplete) {
+    captionRangeAnchorIndex = segment.index;
+    captionRangeFocusIndex = segment.index;
+    captionRangeComplete = false;
+    clipStartInput.value = segment.start;
+    clipEndInput.value = segment.end;
+    renderCaptionSegments();
+    appendLog("Clip range start set from caption segment.");
+    return;
+  }
+
+  const anchorSegment = findCaptionSegment(captionRangeAnchorIndex);
+  if (!anchorSegment) {
+    captionRangeAnchorIndex = segment.index;
+    captionRangeFocusIndex = segment.index;
+    captionRangeComplete = false;
+    clipStartInput.value = segment.start;
+    clipEndInput.value = segment.end;
+    renderCaptionSegments();
+    appendLog("Clip range start set from caption segment.");
+    return;
+  }
+
+  if (segment.index === anchorSegment.index) {
+    clipStartInput.value = segment.start;
+    clipEndInput.value = segment.end;
+    renderCaptionSegments();
+    appendLog("Clip range start set from caption segment.");
+    return;
+  }
+
+  captionRangeFocusIndex = segment.index;
+  captionRangeComplete = true;
+
+  if (segment.index < anchorSegment.index) {
+    clipStartInput.value = segment.start;
+    clipEndInput.value = anchorSegment.end;
+  } else {
+    clipStartInput.value = anchorSegment.start;
+    clipEndInput.value = segment.end;
+  }
+
+  renderCaptionSegments();
+  appendLog("Clip range set from caption segments.");
+}
+
 function handleLiveWhisperCaptionLine(line: string): void {
   const segment = parseWhisperCaptionLine(line);
   if (!segment) {
@@ -627,6 +724,10 @@ function getCaptionPreview(text: string): string {
   return text.length <= 120 ? text : `${text.slice(0, 117).trimEnd()}...`;
 }
 
+function getShortCaptionPreview(text: string): string {
+  return text.length <= 72 ? text : `${text.slice(0, 69).trimEnd()}...`;
+}
+
 function parseSrtSegments(srtText: string): CaptionSegment[] {
   const normalizedText = srtText.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
   if (normalizedText === "") {
@@ -685,6 +786,7 @@ function renderCaptionSegments(): void {
     emptyNode.className = "caption-segments-empty";
     emptyNode.textContent = "Generate captions to see segments.";
     captionSegmentListNode.appendChild(emptyNode);
+    renderCaptionSelectionSummary();
     return;
   }
 
@@ -698,33 +800,8 @@ function renderCaptionSegments(): void {
       "is-in-range",
       rangeStartIndex !== null && rangeEndIndex !== null && segment.index >= rangeStartIndex && segment.index <= rangeEndIndex
     );
-    row.addEventListener("click", (event) => {
-      if (event.shiftKey && captionRangeAnchorIndex !== null) {
-        const anchorSegment = captionSegments.find((candidate) => candidate.index === captionRangeAnchorIndex);
-        if (!anchorSegment) {
-          return;
-        }
-
-        captionRangeFocusIndex = segment.index;
-        if (segment.index < anchorSegment.index) {
-          clipStartInput.value = segment.start;
-          clipEndInput.value = anchorSegment.end;
-        } else {
-          clipStartInput.value = anchorSegment.start;
-          clipEndInput.value = segment.end;
-        }
-
-        renderCaptionSegments();
-        appendLog("Clip end extended to caption segment.");
-        return;
-      }
-
-      captionRangeAnchorIndex = segment.index;
-      captionRangeFocusIndex = segment.index;
-      clipStartInput.value = segment.start;
-      clipEndInput.value = segment.end;
-      renderCaptionSegments();
-      appendLog("Clip range set from caption segment.");
+    row.addEventListener("click", () => {
+      selectCaptionSegment(segment);
     });
 
     const timeNode = document.createElement("span");
@@ -745,6 +822,8 @@ function renderCaptionSegments(): void {
     row.append(timeNode, textNode);
     captionSegmentListNode.appendChild(row);
   }
+
+  renderCaptionSelectionSummary();
 }
 
 function setCaptionSegments(segments: CaptionSegment[]): void {
@@ -753,6 +832,7 @@ function setCaptionSegments(segments: CaptionSegment[]): void {
     captionSegmentUserScrolledUp = false;
     captionRangeAnchorIndex = null;
     captionRangeFocusIndex = null;
+    captionRangeComplete = false;
   }
 
   captionSegments = segments;
@@ -970,6 +1050,22 @@ captionSegmentListNode.addEventListener("scroll", () => {
   const distanceFromBottom =
     captionSegmentListNode.scrollHeight - captionSegmentListNode.scrollTop - captionSegmentListNode.clientHeight;
   captionSegmentUserScrolledUp = distanceFromBottom > 16;
+});
+
+captionClearSelectionButton.addEventListener("click", () => {
+  clearCaptionRangeSelection();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") {
+    return;
+  }
+
+  if (captionRangeAnchorIndex === null) {
+    return;
+  }
+
+  clearCaptionRangeSelection();
 });
 
 copyLogButton.addEventListener("click", async () => {

@@ -231,7 +231,41 @@ button:disabled {
   margin-bottom: 10px;
 }
 
+.caption-segments-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .caption-segments-count {
+  color: #4f5973;
+  font-size: 0.9rem;
+}
+
+.caption-clear-selection {
+  padding: 5px 10px;
+  border-color: #c9d2f6;
+  background: #ffffff;
+  color: #3150c8;
+  font-size: 0.86rem;
+}
+
+.caption-selection-summary {
+  display: grid;
+  gap: 3px;
+  margin-bottom: 8px;
+  padding: 9px 10px;
+  border: 1px solid #c9d2f6;
+  border-radius: 8px;
+  background: #f5f7ff;
+}
+
+.caption-selection-title {
+  color: #1f2e68;
+  font-weight: 700;
+}
+
+.caption-selection-detail {
   color: #4f5973;
   font-size: 0.9rem;
 }

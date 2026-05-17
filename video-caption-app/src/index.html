@@ -80,8 +80,12 @@
   <section class="paths">
     <div class="caption-segments-header">
       <span class="label">Caption Segments</span>
-      <span id="captionSegmentsCount" class="caption-segments-count">0 captions</span>
+      <div class="caption-segments-header-actions">
+        <span id="captionSegmentsCount" class="caption-segments-count">0 captions</span>
+        <button id="captionClearSelectionButton" class="caption-clear-selection" type="button" hidden>Clear selection</button>
+      </div>
     </div>
+    <div id="captionSelectionSummary" class="caption-selection-summary" hidden></div>
     <div id="captionSegmentList" class="caption-segments-list">
       <p class="caption-segments-empty">Generate captions to see segments.</p>
     </div>
