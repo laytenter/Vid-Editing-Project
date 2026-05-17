@@ -99,6 +99,10 @@ const maxLogEntries = 5000;
 let logRenderScheduled = false;
 let captionSegments: CaptionSegment[] = [];
 let activeAction: ActiveAction | null = null;
+let whisperStdoutBuffer = "";
+let captionSegmentUserScrolledUp = false;
+let captionRangeAnchorIndex: number | null = null;
+let captionRangeFocusIndex: number | null = null;
 
 function isSupportedVideoPath(filePath: string): boolean {
   const extensionMatch = filePath.toLowerCase().match(/\.([^.\\/]+)$/);
@@ -348,6 +352,34 @@ function parseWhisperPercent(message: string): number | null {
   return Number.isFinite(percent) ? clampNumber(percent, 0, 100) : null;
 }
 
+function parseWhisperDurationSeconds(message: string): number | null {
+  const match = message.match(/\(\d+\s+samples,\s*(\d+(?:\.\d+)?)\s*sec\)/i);
+  if (!match) {
+    return null;
+  }
+
+  const seconds = Number(match[1]);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+}
+
+function parseWhisperCaptionLine(line: string): CaptionSegment | null {
+  const match = line.match(
+    /^\s*\[(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,.]\d{3})\]\s*(.*)$/
+  );
+
+  if (!match) {
+    return null;
+  }
+
+  const text = match[3].trim();
+  return {
+    index: captionSegments.length + 1,
+    start: normalizeCaptionTime(match[1]),
+    end: normalizeCaptionTime(match[2]),
+    text: text || "(no text)"
+  };
+}
+
 function setActionStatus(label: string, text: string, mode: ActionStatusMode, percent = 0): void {
   const clampedPercent = clampNumber(percent, 0, 100);
   actionStatusNode.textContent = label;
@@ -372,6 +404,11 @@ function setIdleActionStatus(): void {
 }
 
 function startActionStatus(kind: ActiveActionKind, label: string, totalDurationSeconds: number | null = null): void {
+  if (kind === "caption") {
+    whisperStdoutBuffer = "";
+    captionSegmentUserScrolledUp = false;
+  }
+
   activeAction = {
     kind,
     label,
@@ -448,23 +485,100 @@ function updateFfmpegActionProgress(message: string): void {
   updateDeterminateActionProgress((progressSeconds / activeAction.totalDurationSeconds) * 100);
 }
 
+function getCaptionStatusText(): string {
+  const segmentLabel = captionSegments.length === 1 ? "segment" : "segments";
+  return captionSegments.length > 0 ? `Generating captions... ${captionSegments.length} ${segmentLabel}` : "Generating captions...";
+}
+
 function updateWhisperActionProgress(message: string): void {
   if (!activeAction) {
     return;
   }
 
+  const durationSeconds = parseWhisperDurationSeconds(message);
+  if (durationSeconds !== null && activeAction.totalDurationSeconds === null) {
+    activeAction.totalDurationSeconds = durationSeconds;
+  }
+
   const percent = parseWhisperPercent(message);
   if (percent === null) {
-    setActionStatus(activeAction.label, "Generating captions...", "indeterminate", 0);
+    setActionStatus(activeAction.label, getCaptionStatusText(), "indeterminate", 0);
     return;
   }
 
   updateDeterminateActionProgress(percent);
 }
 
-function updateActionProgressFromToolLog(entry: { tool: ToolName; message: string }): void {
+function updateCaptionProgressFromTimestamp(endTime: string): void {
+  if (!activeAction || activeAction.kind !== "caption") {
+    return;
+  }
+
+  const endSeconds = parseTimestampSeconds(endTime);
+  if (endSeconds === null || activeAction.totalDurationSeconds === null || activeAction.totalDurationSeconds <= 0) {
+    setActionStatus(activeAction.label, getCaptionStatusText(), "indeterminate", 0);
+    return;
+  }
+
+  updateDeterminateActionProgress((endSeconds / activeAction.totalDurationSeconds) * 100);
+}
+
+function shouldAutoScrollCaptionSegments(): boolean {
+  if (!activeAction || activeAction.kind !== "caption") {
+    return false;
+  }
+
+  return !captionSegmentUserScrolledUp;
+}
+
+function scrollCaptionSegmentsToBottom(): void {
+  captionSegmentListNode.scrollTop = captionSegmentListNode.scrollHeight;
+}
+
+function handleLiveWhisperCaptionLine(line: string): void {
+  const segment = parseWhisperCaptionLine(line);
+  if (!segment) {
+    return;
+  }
+
+  const duplicate = captionSegments.some(
+    (existing) => existing.start === segment.start && existing.end === segment.end && existing.text === segment.text
+  );
+
+  if (duplicate) {
+    return;
+  }
+
+  const shouldScroll = shouldAutoScrollCaptionSegments();
+  captionSegments.push(segment);
+  renderCaptionSegments();
+
+  if (shouldScroll) {
+    scrollCaptionSegmentsToBottom();
+  }
+
+  updateCaptionProgressFromTimestamp(segment.end);
+}
+
+function processWhisperStdoutChunk(message: string): void {
+  // whisper.cpp may buffer stdout until late; only update live rows when timestamped chunks actually arrive.
+  whisperStdoutBuffer += message.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+  const lines = whisperStdoutBuffer.split("\n");
+  whisperStdoutBuffer = lines.pop() ?? "";
+
+  for (const line of lines) {
+    handleLiveWhisperCaptionLine(line);
+  }
+}
+
+function updateActionProgressFromToolLog(entry: { tool: ToolName; stream?: StreamName; message: string }): void {
   if (!activeAction) {
     return;
+  }
+
+  if (activeAction.kind === "caption" && entry.tool === "whisper" && entry.stream === "stdout") {
+    processWhisperStdoutChunk(entry.message);
   }
 
   for (const line of splitMessageLines(entry.message)) {
@@ -474,7 +588,9 @@ function updateActionProgressFromToolLog(entry: { tool: ToolName; message: strin
         updateFfmpegActionProgress(line);
       } else if (entry.tool === "whisper") {
         setActiveActionStage("Generating captions...");
-        updateWhisperActionProgress(line);
+        if (entry.stream !== "stdout" || !parseWhisperCaptionLine(line)) {
+          updateWhisperActionProgress(line);
+        }
       }
 
       continue;
@@ -555,6 +671,14 @@ function renderCaptionSegments(): void {
   const captionLabel = captionSegments.length === 1 ? "caption" : "captions";
   captionSegmentsCountNode.textContent = `${captionSegments.length} ${captionLabel}`;
   captionSegmentListNode.replaceChildren();
+  const rangeStartIndex =
+    captionRangeAnchorIndex !== null && captionRangeFocusIndex !== null
+      ? Math.min(captionRangeAnchorIndex, captionRangeFocusIndex)
+      : null;
+  const rangeEndIndex =
+    captionRangeAnchorIndex !== null && captionRangeFocusIndex !== null
+      ? Math.max(captionRangeAnchorIndex, captionRangeFocusIndex)
+      : null;
 
   if (captionSegments.length === 0) {
     const emptyNode = document.createElement("p");
@@ -568,15 +692,38 @@ function renderCaptionSegments(): void {
     const row = document.createElement("button");
     row.type = "button";
     row.className = "caption-segment-row";
+    row.classList.toggle("is-range-start", rangeStartIndex !== null && segment.index === rangeStartIndex);
+    row.classList.toggle("is-range-end", rangeEndIndex !== null && segment.index === rangeEndIndex);
+    row.classList.toggle(
+      "is-in-range",
+      rangeStartIndex !== null && rangeEndIndex !== null && segment.index >= rangeStartIndex && segment.index <= rangeEndIndex
+    );
     row.addEventListener("click", (event) => {
-      if (event.shiftKey && clipStartInput.value.trim() !== "") {
-        clipEndInput.value = segment.end;
+      if (event.shiftKey && captionRangeAnchorIndex !== null) {
+        const anchorSegment = captionSegments.find((candidate) => candidate.index === captionRangeAnchorIndex);
+        if (!anchorSegment) {
+          return;
+        }
+
+        captionRangeFocusIndex = segment.index;
+        if (segment.index < anchorSegment.index) {
+          clipStartInput.value = segment.start;
+          clipEndInput.value = anchorSegment.end;
+        } else {
+          clipStartInput.value = anchorSegment.start;
+          clipEndInput.value = segment.end;
+        }
+
+        renderCaptionSegments();
         appendLog("Clip end extended to caption segment.");
         return;
       }
 
+      captionRangeAnchorIndex = segment.index;
+      captionRangeFocusIndex = segment.index;
       clipStartInput.value = segment.start;
       clipEndInput.value = segment.end;
+      renderCaptionSegments();
       appendLog("Clip range set from caption segment.");
     });
 
@@ -601,8 +748,19 @@ function renderCaptionSegments(): void {
 }
 
 function setCaptionSegments(segments: CaptionSegment[]): void {
+  const shouldScroll = shouldAutoScrollCaptionSegments();
+  if (segments.length === 0) {
+    captionSegmentUserScrolledUp = false;
+    captionRangeAnchorIndex = null;
+    captionRangeFocusIndex = null;
+  }
+
   captionSegments = segments;
   renderCaptionSegments();
+
+  if (shouldScroll) {
+    scrollCaptionSegmentsToBottom();
+  }
 }
 
 function renderLogPanel(): void {
@@ -802,6 +960,16 @@ showRawLogsCheckbox.addEventListener("change", () => {
 
 logFilterSelect.addEventListener("change", () => {
   scheduleLogPanelRender();
+});
+
+captionSegmentListNode.addEventListener("scroll", () => {
+  if (!activeAction || activeAction.kind !== "caption") {
+    return;
+  }
+
+  const distanceFromBottom =
+    captionSegmentListNode.scrollHeight - captionSegmentListNode.scrollTop - captionSegmentListNode.clientHeight;
+  captionSegmentUserScrolledUp = distanceFromBottom > 16;
 });
 
 copyLogButton.addEventListener("click", async () => {

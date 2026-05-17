@@ -266,6 +266,22 @@ button:disabled {
   background: #f5f7ff;
 }
 
+.caption-segment-row.is-in-range {
+  border-color: #9fb1ff;
+  background: #f1f4ff;
+}
+
+.caption-segment-row.is-range-start,
+.caption-segment-row.is-range-end {
+  border-color: #3150c8;
+  background: #e8edff;
+  box-shadow: inset 4px 0 0 #3150c8;
+}
+
+.caption-segment-row.is-range-start.is-range-end {
+  box-shadow: inset 4px 0 0 #3150c8;
+}
+
 .caption-segment-time {
   display: grid;
   gap: 3px;
