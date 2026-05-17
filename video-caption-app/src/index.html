@@ -74,6 +74,20 @@
         <option value="encode">Encode (accurate)</option>
       </select>
       <button id="clipCreateBtn" type="button">Create clip</button>
+      <button id="clipAddRangeBtn" type="button">Add clip range</button>
+    </div>
+  </section>
+
+  <section class="paths queued-clips-panel">
+    <div class="queued-clips-header">
+      <span class="label">Queued Clips</span>
+      <div class="queued-clips-actions">
+        <span id="queuedClipsCount" class="queued-clips-count">0 clips</span>
+        <button id="queuedClipsExportBtn" type="button" disabled>Export All Clips</button>
+      </div>
+    </div>
+    <div id="queuedClipsList" class="queued-clips-list">
+      <p class="queued-clips-empty">Add clip ranges to queue them for batch export.</p>
     </div>
   </section>
 

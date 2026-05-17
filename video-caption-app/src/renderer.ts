@@ -56,6 +56,10 @@ const clipStartInput = mustGet<HTMLInputElement>("clipStart");
 const clipEndInput = mustGet<HTMLInputElement>("clipEnd");
 const clipModeSelect = mustGet<HTMLSelectElement>("clipMode");
 const clipCreateButton = mustGet<HTMLButtonElement>("clipCreateBtn");
+const clipAddRangeButton = mustGet<HTMLButtonElement>("clipAddRangeBtn");
+const queuedClipsCountNode = mustGet<HTMLElement>("queuedClipsCount");
+const queuedClipsListNode = mustGet<HTMLElement>("queuedClipsList");
+const queuedClipsExportButton = mustGet<HTMLButtonElement>("queuedClipsExportBtn");
 
 let selectedVideoPath: string | null = null;
 let audioPath: string | null = null;
@@ -100,10 +104,21 @@ interface ActiveAction {
   totalDurationSeconds: number | null;
 }
 
+interface QueuedClip {
+  id: number;
+  videoPath: string;
+  startTime: string;
+  endTime: string;
+  mode: "copy" | "encode";
+  preview: string;
+}
+
 const logEntries: StoredLogEntry[] = [];
 const maxLogEntries = 5000;
 let logRenderScheduled = false;
 let captionSegments: CaptionSegment[] = [];
+let queuedClips: QueuedClip[] = [];
+let nextQueuedClipId = 1;
 let activeAction: ActiveAction | null = null;
 let whisperStdoutBuffer = "";
 let captionSegmentUserScrolledUp = false;
@@ -160,6 +175,8 @@ function syncButtons(): void {
   saveWavCheckbox.disabled = isBusy || settingsBusy;
   saveCaptionsCheckbox.disabled = isBusy || settingsBusy;
   clipCreateButton.disabled = isBusy || !selectedVideoPath;
+  clipAddRangeButton.disabled = isBusy || !selectedVideoPath;
+  queuedClipsExportButton.disabled = isBusy || queuedClips.length === 0;
 }
 
 function getDirectoryFromPath(filePath: string): string | null {
@@ -881,6 +898,31 @@ function getShortCaptionPreview(text: string): string {
   return text.length <= 72 ? text : `${text.slice(0, 69).trimEnd()}...`;
 }
 
+function getQueuedClipPreview(startTime: string, endTime: string): string {
+  const startSeconds = parseTimestampSeconds(startTime);
+  const endSeconds = parseTimestampSeconds(endTime);
+
+  if (startSeconds === null || endSeconds === null) {
+    return "";
+  }
+
+  const selectedSegments = captionSegments.filter((segment) => {
+    const segmentStart = parseTimestampSeconds(segment.start);
+    const segmentEnd = parseTimestampSeconds(segment.end);
+    return segmentStart !== null && segmentEnd !== null && segmentEnd > startSeconds && segmentStart < endSeconds;
+  });
+
+  if (selectedSegments.length === 0) {
+    return "";
+  }
+
+  if (selectedSegments.length === 1) {
+    return getShortCaptionPreview(selectedSegments[0].text);
+  }
+
+  return `${getShortCaptionPreview(selectedSegments[0].text)} / ${getShortCaptionPreview(selectedSegments[selectedSegments.length - 1].text)}`;
+}
+
 function parseSrtSegments(srtText: string): CaptionSegment[] {
   const normalizedText = srtText.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
   if (normalizedText === "") {
@@ -997,6 +1039,54 @@ function setCaptionSegments(segments: CaptionSegment[]): void {
   if (shouldScroll) {
     scrollCaptionSegmentsToBottom();
   }
+}
+
+function renderQueuedClips(): void {
+  const clipLabel = queuedClips.length === 1 ? "clip" : "clips";
+  queuedClipsCountNode.textContent = `${queuedClips.length} ${clipLabel}`;
+  queuedClipsListNode.replaceChildren();
+
+  if (queuedClips.length === 0) {
+    const emptyNode = document.createElement("p");
+    emptyNode.className = "queued-clips-empty";
+    emptyNode.textContent = "Add clip ranges to queue them for batch export.";
+    queuedClipsListNode.appendChild(emptyNode);
+    syncButtons();
+    return;
+  }
+
+  for (const clip of queuedClips) {
+    const row = document.createElement("div");
+    row.className = "queued-clip-row";
+
+    const timeNode = document.createElement("div");
+    timeNode.className = "queued-clip-time";
+    timeNode.textContent = `${clip.startTime} -> ${clip.endTime}`;
+
+    const previewNode = document.createElement("div");
+    previewNode.className = "queued-clip-preview";
+    previewNode.textContent = clip.preview || "(manual range)";
+
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "queued-clip-remove";
+    removeButton.textContent = "Remove";
+    removeButton.disabled = isBusy;
+    removeButton.addEventListener("click", () => {
+      queuedClips = queuedClips.filter((candidate) => candidate.id !== clip.id);
+      renderQueuedClips();
+    });
+
+    row.append(timeNode, previewNode, removeButton);
+    queuedClipsListNode.appendChild(row);
+  }
+
+  syncButtons();
+}
+
+function clearQueuedClips(): void {
+  queuedClips = [];
+  renderQueuedClips();
 }
 
 function renderLogPanel(): void {
@@ -1117,6 +1207,7 @@ function applySelectedVideo(videoPath: string): void {
   vttPath = null;
   audioSourceKind = null;
   setCaptionSegments([]);
+  clearQueuedClips();
 
   refreshPaths();
   syncButtons();
@@ -1263,6 +1354,39 @@ copyLogButton.addEventListener("click", async () => {
       document.body.removeChild(textarea);
     }
   }
+});
+
+clipAddRangeButton.addEventListener("click", () => {
+  if (!selectedVideoPath) {
+    appendLog("Add clip range failed: no video selected.");
+    return;
+  }
+
+  const startTime = clipStartInput.value.trim();
+  const endTime = clipEndInput.value.trim();
+
+  if (startTime === "" || endTime === "") {
+    appendLog("Add clip range failed: start and end time are required.");
+    return;
+  }
+
+  if (getClipDurationSeconds(startTime, endTime) === null) {
+    appendLog("Add clip range failed: end time must be after start time.");
+    return;
+  }
+
+  queuedClips.push({
+    id: nextQueuedClipId,
+    videoPath: selectedVideoPath,
+    startTime,
+    endTime,
+    mode: clipModeSelect.value === "encode" ? "encode" : "copy",
+    preview: getQueuedClipPreview(startTime, endTime)
+  });
+  nextQueuedClipId += 1;
+
+  renderQueuedClips();
+  appendLog(`Queued clip range: ${startTime} - ${endTime}`);
 });
 
 selectVideoButton.addEventListener("click", async () => {
@@ -1500,6 +1624,63 @@ clipCreateButton.addEventListener("click", async () => {
   }
 });
 
+queuedClipsExportButton.addEventListener("click", async () => {
+  if (queuedClips.length === 0) {
+    return;
+  }
+
+  const clipsToExport = [...queuedClips];
+  const totalClips = clipsToExport.length;
+  let exportedCount = 0;
+  let failedCount = 0;
+
+  setBusy(true);
+  renderQueuedClips();
+
+  try {
+    for (let index = 0; index < clipsToExport.length; index += 1) {
+      const clip = clipsToExport[index];
+      const clipNumber = index + 1;
+      const outputDir = currentSettings ? getEffectiveOutputDirectory(clip.videoPath) : getDirectoryFromPath(clip.videoPath) ?? "";
+
+      if (outputDir === "" || outputDir === "(auto)") {
+        failedCount += 1;
+        appendLog(`Export queued clip ${clipNumber} failed: unable to resolve output directory.`);
+        continue;
+      }
+
+      const suffix = String(clipNumber).padStart(3, "0");
+      const outputPath = joinOutputPath(outputDir, `${getBaseNameFromPath(clip.videoPath)}_clip_${suffix}.mp4`);
+      startActionStatus(
+        "clip",
+        `Exporting clip ${clipNumber} of ${totalClips}...`,
+        getClipDurationSeconds(clip.startTime, clip.endTime)
+      );
+
+      try {
+        const result = await window.videoTools.clipVideo({
+          videoPath: clip.videoPath,
+          startTime: clip.startTime,
+          endTime: clip.endTime,
+          outputPath,
+          mode: clip.mode
+        });
+        exportedCount += 1;
+        appendLog(`Queued clip ${clipNumber} exported: ${result.outputPath}`);
+      } catch (error) {
+        failedCount += 1;
+        appendLog(`Export queued clip ${clipNumber} failed: ${(error as Error).message}`);
+      }
+    }
+
+    activeAction = null;
+    setActionStatus("Done", `Done (${exportedCount} exported, ${failedCount} failed)`, "done", 100);
+  } finally {
+    setBusy(false);
+    renderQueuedClips();
+  }
+});
+
 extractAudioButton.addEventListener("click", async () => {
   if (!selectedVideoPath) {
     return;
@@ -1624,6 +1805,7 @@ setIdleActionStatus();
 syncRawLogVisibility();
 refreshPaths();
 renderCaptionSegments();
+renderQueuedClips();
 syncButtons();
 appendLog("Ready.");
 void initSettingsPanel();
