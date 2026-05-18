@@ -1,6 +1,10 @@
 ﻿node_modules/
 dist/
 .tmp-ts-test/
+.runtime-staging/
+video-caption-app/bin/ffmpeg.exe
+video-caption-app/bin/ffprobe.exe
+video-caption-app/bin/*.previous.exe
 *.log
 .DS_Store
 Thumbs.db
