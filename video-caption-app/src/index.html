@@ -8,16 +8,20 @@
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
-  <header class="hero">
+  <div class="app-shell">
+  <header class="hero app-header">
     <img class="app-logo" src="./app-logo.svg" alt="Video Caption App logo" width="72" height="72" />
     <div class="hero-copy">
       <p class="eyebrow">Local video workflow</p>
       <h1>Video Caption App</h1>
       <p class="hero-tagline">Generate captions, export subtitle files, and clip footage locally with FFmpeg and Whisper.</p>
     </div>
+    <button id="showLogButton" class="header-log-button" type="button">Show Log</button>
   </header>
 
-  <section class="source-panel">
+  <main class="workspace" aria-label="Video caption workspace">
+  <div class="workspace-column controls-column">
+  <section class="source-panel workspace-card">
     <div class="section-header">
       <div>
         <p class="eyebrow section-eyebrow">Media Source</p>
@@ -27,19 +31,16 @@
       <span id="captionSourceStatus" class="status-pill" data-state="idle">No source selected</span>
     </div>
     <div id="dropZone">Drop video or audio here</div>
-    <div class="actions">
+    <div class="actions source-actions">
       <button id="selectVideoButton">Upload Video</button>
       <button id="selectAudioButton">Upload Audio</button>
       <button id="extractAudioButton" disabled>Extract Audio</button>
       <button id="generateCaptionsButton" disabled>Generate Captions</button>
-    </div>
-    <div class="actions actions-secondary">
-      <button id="saveSrtButton" disabled>Save SRT</button>
-      <button id="saveVttButton" disabled>Save VTT</button>
+      <button id="saveAudioButton" disabled>Save Audio</button>
     </div>
   </section>
 
-  <section class="paths action-status-panel" aria-live="polite">
+  <section class="paths action-status-panel workspace-card compact-card" aria-live="polite">
     <div class="action-status-header">
       <span id="actionStatus" class="label">Idle</span>
       <span id="actionProgressText" class="action-progress-text">Idle</span>
@@ -49,30 +50,7 @@
     </div>
   </section>
 
-  <section class="paths">
-    <div class="path-row"><span class="label">Output Folder:</span><span id="outputDirLabel">(auto)</span></div>
-    <div class="actions">
-      <button id="chooseOutputDirButton">Choose Output Folder...</button>
-      <button id="openOutputDirButton">Open Output Folder</button>
-      <button id="openTempFolderButton">Open Temp Folder</button>
-    </div>
-    <div class="path-row settings-row">
-      <label for="themeSelect" class="label">Appearance</label>
-      <select id="themeSelect" aria-label="Appearance">
-        <option value="system">System</option>
-        <option value="dark">Dark</option>
-        <option value="light">Light</option>
-      </select>
-    </div>
-    <div class="path-row">
-      <label><input type="checkbox" id="saveWavCheckbox" /> Save extracted WAV to output folder</label>
-    </div>
-    <div class="path-row">
-      <label><input type="checkbox" id="saveCaptionsCheckbox" /> Auto-save captions (.srt/.vtt) to output folder</label>
-    </div>
-  </section>
-
-  <section class="paths">
+  <section class="paths workspace-card clip-card">
     <div class="path-row"><span class="label">Clip Video</span></div>
     <div class="actions">
       <input id="clipStart" aria-label="Clip start time" title="Clip start time" placeholder="HH:MM:SS.mmm" />
@@ -86,20 +64,10 @@
     </div>
   </section>
 
-  <section class="paths queued-clips-panel">
-    <div class="queued-clips-header">
-      <span class="label">Queued Clips</span>
-      <div class="queued-clips-actions">
-        <span id="queuedClipsCount" class="queued-clips-count">0 clips</span>
-        <button id="queuedClipsExportBtn" type="button" disabled>Export All Clips</button>
-      </div>
-    </div>
-    <div id="queuedClipsList" class="queued-clips-list">
-      <p class="queued-clips-empty">Add clip ranges to queue them for batch export.</p>
-    </div>
-  </section>
+  </div>
 
-  <section class="paths preview-panel">
+  <div class="workspace-column main-column">
+  <section class="paths preview-panel workspace-card preview-card">
     <div class="path-row">
       <span class="label">Preview</span>
       <span id="previewStatus" class="preview-status">No media selected</span>
@@ -109,11 +77,13 @@
     <p id="previewEmpty" class="preview-empty">Select video or audio to preview.</p>
   </section>
 
-  <section class="paths">
+  <section class="paths workspace-card captions-card">
     <div class="caption-segments-header">
       <span class="label">Caption Segments</span>
       <div class="caption-segments-header-actions">
         <span id="captionSegmentsCount" class="caption-segments-count">0 captions</span>
+        <button id="saveSrtButton" class="caption-save-button" type="button" disabled>Save SRT</button>
+        <button id="saveVttButton" class="caption-save-button" type="button" disabled>Save VTT</button>
         <button id="captionClearSelectionButton" class="caption-clear-selection" type="button" hidden>Clear selection</button>
       </div>
     </div>
@@ -126,34 +96,56 @@
       <p class="caption-segments-empty">Generate captions to see segments.</p>
     </div>
   </section>
+  </div>
 
-  <section class="paths">
+  <aside class="workspace-column details-column" aria-label="Output and logs">
+  <section class="paths queued-clips-panel workspace-card">
+    <div class="queued-clips-header">
+      <span class="label">Queued Clips</span>
+      <div class="queued-clips-actions">
+        <span id="queuedClipsCount" class="queued-clips-count">0 clips</span>
+        <button id="queuedClipsExportBtn" type="button" disabled>Export All Clips</button>
+      </div>
+    </div>
+    <div id="queuedClipsList" class="queued-clips-list">
+      <p class="queued-clips-empty">Add clip ranges to queue them for batch export.</p>
+    </div>
+  </section>
+
+  <section class="paths workspace-card file-paths-card">
     <div class="path-row"><span class="label">Selected Video:</span><span id="selectedVideoPath">(none)</span></div>
     <div class="path-row"><span class="label">Caption Audio:</span><span id="audioPath">(none)</span></div>
     <div class="path-row"><span class="label">SRT:</span><span id="srtPath">(none)</span></div>
     <div class="path-row"><span class="label">VTT:</span><span id="vttPath">(none)</span></div>
   </section>
 
-  <div class="raw-log-section">
-    <label id="rawLogsToggleLabel" class="raw-log-toggle">
-      <input type="checkbox" id="showRawLogsCheckbox" />
-      <span id="rawLogsToggleText">Show raw logs</span>
-    </label>
-    <div id="rawLogDetails" class="raw-log-details" hidden>
-      <div class="actions">
-        <label>
-          Filter:
-          <select id="logFilterSelect">
-            <option value="all">all</option>
-            <option value="ffmpeg">ffmpeg</option>
-            <option value="whisper">whisper</option>
-            <option value="errors">errors</option>
-          </select>
-        </label>
-        <button id="copyLogButton" type="button">Copy log</button>
-      </div>
-      <pre id="logPanel"></pre>
+  </aside>
+  </main>
+  <div id="logDrawerBackdrop" class="log-drawer-backdrop" hidden></div>
+  <aside id="logDrawer" class="log-drawer" aria-label="Log output" aria-hidden="true">
+    <div id="logDrawerResizeHandle" class="log-drawer-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize log drawer"></div>
+    <div class="log-drawer-header">
+      <h2>Log</h2>
+      <button id="closeLogButton" class="log-drawer-close" type="button">Close</button>
     </div>
+    <div class="log-drawer-controls">
+      <label class="raw-log-check">
+        <input type="checkbox" id="showRawLogsCheckbox" />
+        Raw FFmpeg
+      </label>
+      <label>
+        Filter
+        <select id="logFilterSelect">
+          <option value="all">all</option>
+          <option value="ffmpeg">ffmpeg</option>
+          <option value="whisper">whisper</option>
+          <option value="errors">errors</option>
+        </select>
+      </label>
+      <button id="copyLogButton" type="button">Copy log</button>
+    </div>
+    <pre id="logPanel"></pre>
+  </aside>
   </div>
 
   <script>var exports = {}; var module = { exports: exports };</script>

@@ -5,9 +5,6 @@
 }
 
 export interface PersistedSettings {
-  outputDir: string | null;
-  saveWavToOutputDir: boolean;
-  saveCaptionsToOutputDir: boolean;
   themeMode: "system" | "dark" | "light";
 }
 

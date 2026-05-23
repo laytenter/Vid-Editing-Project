@@ -19,9 +19,6 @@ const videoToolsApi = {
   setSettings: (partial: Partial<PersistedSettings>): Promise<AppSettings> => {
     return ipcRenderer.invoke("settings:set", partial);
   },
-  chooseOutputFolder: (): Promise<string | null> => {
-    return ipcRenderer.invoke("choose-output-folder");
-  },
   openPath: (targetPath: string): Promise<boolean> => {
     return ipcRenderer.invoke("open-path", targetPath);
   },
@@ -54,6 +51,17 @@ const videoToolsApi = {
 
     return () => {
       ipcRenderer.removeListener("menu:open-video", listener);
+    };
+  },
+  onSettingsChanged: (callback: (settings: AppSettings) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, settings: AppSettings) => {
+      callback(settings);
+    };
+
+    ipcRenderer.on("settings:changed", listener);
+
+    return () => {
+      ipcRenderer.removeListener("settings:changed", listener);
     };
   },
   saveFileAs: (request: SaveFileAsRequest): Promise<string | null> => {

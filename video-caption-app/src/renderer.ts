@@ -1,7 +1,4 @@
 ﻿type AppSettings = {
-  outputDir: string | null;
-  saveWavToOutputDir: boolean;
-  saveCaptionsToOutputDir: boolean;
   themeMode: ThemeMode;
   documentsDir: string;
 };
@@ -19,6 +16,7 @@ const selectVideoButton = mustGet<HTMLButtonElement>("selectVideoButton");
 const selectAudioButton = mustGet<HTMLButtonElement>("selectAudioButton");
 const extractAudioButton = mustGet<HTMLButtonElement>("extractAudioButton");
 const generateCaptionsButton = mustGet<HTMLButtonElement>("generateCaptionsButton");
+const saveAudioButton = mustGet<HTMLButtonElement>("saveAudioButton");
 const saveSrtButton = mustGet<HTMLButtonElement>("saveSrtButton");
 const saveVttButton = mustGet<HTMLButtonElement>("saveVttButton");
 const captionSourceStatusNode = mustGet<HTMLElement>("captionSourceStatus");
@@ -43,18 +41,13 @@ const srtPathNode = mustGet<HTMLElement>("srtPath");
 const vttPathNode = mustGet<HTMLElement>("vttPath");
 const logPanel = mustGet<HTMLPreElement>("logPanel");
 
-const outputDirLabel = mustGet<HTMLElement>("outputDirLabel");
-const chooseOutputDirButton = mustGet<HTMLButtonElement>("chooseOutputDirButton");
-const openOutputDirButton = mustGet<HTMLButtonElement>("openOutputDirButton");
-const openTempFolderButton = mustGet<HTMLButtonElement>("openTempFolderButton");
-const themeSelect = mustGet<HTMLSelectElement>("themeSelect");
-const saveWavCheckbox = mustGet<HTMLInputElement>("saveWavCheckbox");
-const saveCaptionsCheckbox = mustGet<HTMLInputElement>("saveCaptionsCheckbox");
 const dropZone = mustGet<HTMLDivElement>("dropZone");
+const showLogButton = mustGet<HTMLButtonElement>("showLogButton");
+const closeLogButton = mustGet<HTMLButtonElement>("closeLogButton");
+const logDrawer = mustGet<HTMLElement>("logDrawer");
+const logDrawerBackdrop = mustGet<HTMLElement>("logDrawerBackdrop");
+const logDrawerResizeHandle = mustGet<HTMLElement>("logDrawerResizeHandle");
 const showRawLogsCheckbox = mustGet<HTMLInputElement>("showRawLogsCheckbox");
-const rawLogDetails = mustGet<HTMLElement>("rawLogDetails");
-const rawLogsToggleLabel = mustGet<HTMLElement>("rawLogsToggleLabel");
-const rawLogsToggleText = mustGet<HTMLElement>("rawLogsToggleText");
 const logFilterSelect = mustGet<HTMLSelectElement>("logFilterSelect");
 const copyLogButton = mustGet<HTMLButtonElement>("copyLogButton");
 const clipStartInput = mustGet<HTMLInputElement>("clipStart");
@@ -72,16 +65,14 @@ let srtPath: string | null = null;
 let vttPath: string | null = null;
 let audioSourceKind: AudioSourceKind = null;
 let isBusy = false;
-let settingsBusy = false;
-let currentSettings: AppSettings | null = null;
 let currentThemeMode: ThemeMode = "system";
+let logDrawerWidth = 460;
 
 const allowedVideoExtensions = new Set(["mp4", "mov", "mkv", "avi", "webm", "m4v"]);
 const allowedAudioExtensions = new Set(["wav", "mp3", "m4a", "aac", "flac", "ogg", "opus", "wma", "aiff", "aif"]);
 
 showRawLogsCheckbox.checked = false;
 logFilterSelect.value = "all";
-themeSelect.value = "system";
 
 type ToolName = "ffmpeg" | "whisper";
 type StreamName = "stdout" | "stderr";
@@ -165,35 +156,21 @@ function setBusy(next: boolean): void {
   syncButtons();
 }
 
-function setSettingsBusy(next: boolean): void {
-  settingsBusy = next;
-  syncButtons();
-}
-
 function syncButtons(): void {
   extractAudioButton.disabled = isBusy || !selectedVideoPath;
   generateCaptionsButton.disabled = isBusy || !audioPath;
+  saveAudioButton.disabled = isBusy || !audioPath || audioSourceKind !== "extracted";
   saveSrtButton.disabled = isBusy || !srtPath;
   saveVttButton.disabled = isBusy || !vttPath;
   selectVideoButton.disabled = isBusy;
   selectAudioButton.disabled = isBusy;
 
-  chooseOutputDirButton.disabled = isBusy || settingsBusy;
-  openOutputDirButton.disabled = isBusy || settingsBusy;
-  openTempFolderButton.disabled = isBusy || settingsBusy;
-  themeSelect.disabled = isBusy || settingsBusy;
-  saveWavCheckbox.disabled = isBusy || settingsBusy;
-  saveCaptionsCheckbox.disabled = isBusy || settingsBusy;
   clipCreateButton.disabled = isBusy || !selectedVideoPath;
   clipAddRangeButton.disabled = isBusy || !selectedVideoPath;
   queuedClipsExportButton.disabled = isBusy || queuedClips.length === 0;
 }
 
 const systemThemeMedia = window.matchMedia("(prefers-color-scheme: dark)");
-
-function normalizeThemeMode(value: string): ThemeMode {
-  return value === "dark" || value === "light" || value === "system" ? value : "system";
-}
 
 function applyThemeMode(themeMode: ThemeMode): void {
   currentThemeMode = themeMode;
@@ -367,36 +344,6 @@ function joinOutputPath(outputDir: string, fileName: string): string {
   return `${outputDir}${separator}${fileName}`;
 }
 
-function getEffectiveOutputDirectory(contextPath: string | null = getCaptionContextPath()): string {
-  if (!currentSettings) {
-    return "(auto)";
-  }
-
-  if (currentSettings.outputDir) {
-    return currentSettings.outputDir;
-  }
-
-  if (contextPath) {
-    return getDirectoryFromPath(contextPath) ?? currentSettings.documentsDir;
-  }
-
-  return currentSettings.documentsDir;
-}
-
-function updateOutputDirLabel(): void {
-  if (!currentSettings) {
-    outputDirLabel.textContent = "(auto)";
-    return;
-  }
-
-  if (currentSettings.outputDir) {
-    outputDirLabel.textContent = currentSettings.outputDir;
-    return;
-  }
-
-  outputDirLabel.textContent = `(auto) ${getEffectiveOutputDirectory()}`;
-}
-
 function refreshPaths(): void {
   selectedVideoPathNode.textContent = selectedVideoPath ?? "(none)";
   audioPathNode.textContent = audioPath ?? "(none)";
@@ -406,7 +353,6 @@ function refreshPaths(): void {
   captionSourceStatusNode.textContent = sourceStatus.label;
   captionSourceStatusNode.dataset.state = sourceStatus.state;
   updateMediaPreview();
-  updateOutputDirLabel();
 }
 
 function isNoisyFfmpegProgressLine(message: string): boolean {
@@ -935,11 +881,43 @@ function failActionStatus(message: string): void {
   setActionStatus(`Failed: ${message}`, "Failed", "failed", 100);
 }
 
-function syncRawLogVisibility(): void {
-  const showRawLogs = showRawLogsCheckbox.checked;
-  rawLogDetails.hidden = !showRawLogs;
-  rawLogsToggleLabel.classList.toggle("is-active", showRawLogs);
-  rawLogsToggleText.textContent = showRawLogs ? "Hide raw logs" : "Show raw logs";
+function getMaxLogDrawerWidth(): number {
+  return Math.max(320, Math.min(900, window.innerWidth - 32));
+}
+
+function setLogDrawerWidth(width: number): void {
+  const maxWidth = getMaxLogDrawerWidth();
+  const nextWidth = clampNumber(Number.isFinite(width) ? width : 460, 320, maxWidth);
+  logDrawerWidth = nextWidth;
+  document.documentElement.style.setProperty("--log-drawer-width", `${Math.round(nextWidth)}px`);
+}
+
+function openLogDrawer(): void {
+  logDrawer.classList.add("is-open");
+  logDrawer.setAttribute("aria-hidden", "false");
+  logDrawerBackdrop.hidden = false;
+  showLogButton.textContent = "Hide Log";
+  scheduleLogPanelRender();
+}
+
+function closeLogDrawer(): void {
+  logDrawer.classList.remove("is-open");
+  logDrawer.setAttribute("aria-hidden", "true");
+  logDrawerBackdrop.hidden = true;
+  showLogButton.textContent = "Show Log";
+}
+
+function isLogDrawerOpen(): boolean {
+  return logDrawer.classList.contains("is-open");
+}
+
+function toggleLogDrawer(): void {
+  if (isLogDrawerOpen()) {
+    closeLogDrawer();
+    return;
+  }
+
+  openLogDrawer();
 }
 
 function normalizeCaptionTime(value: string): string {
@@ -1383,17 +1361,33 @@ function appendLog(message: string): void {
 }
 
 function renderSettings(settings: AppSettings): void {
-  currentSettings = settings;
-  updateOutputDirLabel();
-  themeSelect.value = settings.themeMode;
   applyThemeMode(settings.themeMode);
-  saveWavCheckbox.checked = settings.saveWavToOutputDir;
-  saveCaptionsCheckbox.checked = settings.saveCaptionsToOutputDir;
 }
 
 async function refreshSettings(): Promise<void> {
   const settings = await window.videoTools.getSettings();
   renderSettings(settings);
+}
+
+async function promptSaveExtractedAudio(): Promise<void> {
+  if (!audioPath || audioSourceKind !== "extracted") {
+    appendLog("Save audio skipped: no extracted audio is available.");
+    return;
+  }
+
+  const defaultBaseName = selectedVideoPath ? getBaseNameFromPath(selectedVideoPath) : getBaseNameFromPath(audioPath);
+
+  try {
+    const savedPath = await window.videoTools.saveFileAs({
+      sourcePath: audioPath,
+      defaultFileName: `${defaultBaseName}_audio.wav`,
+      mediaPath: selectedVideoPath ?? audioPath
+    });
+
+    appendLog(savedPath ? `Saved audio to: ${savedPath}` : "Audio save cancelled.");
+  } catch (error) {
+    appendLog(`Save audio failed: ${(error as Error).message}`);
+  }
 }
 
 function appendSetupHintForMissingDependency(errorMessage: string): void {
@@ -1470,6 +1464,16 @@ if (typeof window.videoTools.onMenuOpenVideo === "function") {
   }
 }
 
+if (typeof window.videoTools.onSettingsChanged === "function") {
+  try {
+    window.videoTools.onSettingsChanged((settings) => {
+      renderSettings(settings);
+    });
+  } catch (error) {
+    console.error("Failed to subscribe to settings:changed", error);
+  }
+}
+
 
 window.addEventListener("error", (event) => {
   const message =
@@ -1499,7 +1503,6 @@ window.addEventListener("unhandledrejection", (event) => {
 });
 
 showRawLogsCheckbox.addEventListener("change", () => {
-  syncRawLogVisibility();
   scheduleLogPanelRender();
 });
 
@@ -1511,6 +1514,40 @@ systemThemeMedia.addEventListener("change", () => {
 
 logFilterSelect.addEventListener("change", () => {
   scheduleLogPanelRender();
+});
+
+showLogButton.addEventListener("click", () => {
+  toggleLogDrawer();
+});
+
+closeLogButton.addEventListener("click", () => {
+  closeLogDrawer();
+});
+
+logDrawerBackdrop.addEventListener("click", () => {
+  closeLogDrawer();
+});
+
+logDrawerResizeHandle.addEventListener("pointerdown", (event) => {
+  event.preventDefault();
+  document.body.classList.add("is-resizing-log-drawer");
+
+  const handlePointerMove = (moveEvent: PointerEvent) => {
+    setLogDrawerWidth(window.innerWidth - moveEvent.clientX);
+  };
+
+  const handlePointerUp = () => {
+    document.body.classList.remove("is-resizing-log-drawer");
+    window.removeEventListener("pointermove", handlePointerMove);
+  };
+
+  setLogDrawerWidth(window.innerWidth - event.clientX);
+  window.addEventListener("pointermove", handlePointerMove);
+  window.addEventListener("pointerup", handlePointerUp, { once: true });
+});
+
+window.addEventListener("resize", () => {
+  setLogDrawerWidth(logDrawerWidth);
 });
 
 captionSegmentListNode.addEventListener("scroll", () => {
@@ -1533,6 +1570,12 @@ captionSearchInput.addEventListener("input", () => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") {
+    return;
+  }
+
+  if (isLogDrawerOpen()) {
+    closeLogDrawer();
+    event.preventDefault();
     return;
   }
 
@@ -1731,102 +1774,6 @@ dropZone.addEventListener("drop", (event) => {
   appendLog("Drop rejected: not a supported video or audio type");
 });
 
-chooseOutputDirButton.addEventListener("click", async () => {
-  setSettingsBusy(true);
-
-  try {
-    const selected = await window.videoTools.chooseOutputFolder();
-    await refreshSettings();
-
-    if (selected) {
-      appendLog(`Output folder set: ${selected}`);
-    } else {
-      appendLog("Output folder selection cancelled.");
-    }
-  } catch (error) {
-    appendLog(`Choose output folder failed: ${(error as Error).message}`);
-  } finally {
-    setSettingsBusy(false);
-  }
-});
-
-openOutputDirButton.addEventListener("click", async () => {
-  setSettingsBusy(true);
-
-  try {
-    const targetPath = getEffectiveOutputDirectory();
-    const ok = await window.videoTools.openPath(targetPath);
-    appendLog(ok ? `Opened output folder: ${targetPath}` : `Could not open output folder: ${targetPath}`);
-  } catch (error) {
-    appendLog(`Open output folder failed: ${(error as Error).message}`);
-  } finally {
-    setSettingsBusy(false);
-  }
-});
-
-openTempFolderButton.addEventListener("click", async () => {
-  setSettingsBusy(true);
-
-  try {
-    const ok = await window.videoTools.openTempFolder();
-    appendLog(ok ? "Opened temp folder." : "Could not open temp folder.");
-  } catch (error) {
-    appendLog(`Open temp folder failed: ${(error as Error).message}`);
-  } finally {
-    setSettingsBusy(false);
-  }
-});
-
-themeSelect.addEventListener("change", async () => {
-  const themeMode = normalizeThemeMode(themeSelect.value);
-  applyThemeMode(themeMode);
-  setSettingsBusy(true);
-
-  try {
-    const settings = await window.videoTools.setSettings({
-      themeMode
-    });
-    renderSettings(settings);
-  } catch (error) {
-    appendLog(`Update setting failed: ${(error as Error).message}`);
-    await refreshSettings();
-  } finally {
-    setSettingsBusy(false);
-  }
-});
-
-saveWavCheckbox.addEventListener("change", async () => {
-  setSettingsBusy(true);
-
-  try {
-    const settings = await window.videoTools.setSettings({
-      saveWavToOutputDir: saveWavCheckbox.checked
-    });
-    renderSettings(settings);
-  } catch (error) {
-    appendLog(`Update setting failed: ${(error as Error).message}`);
-    await refreshSettings();
-  } finally {
-    setSettingsBusy(false);
-  }
-});
-
-saveCaptionsCheckbox.addEventListener("change", async () => {
-  setSettingsBusy(true);
-
-  try {
-    const settings = await window.videoTools.setSettings({
-      saveCaptionsToOutputDir: saveCaptionsCheckbox.checked
-    });
-    renderSettings(settings);
-  } catch (error) {
-    appendLog(`Update setting failed: ${(error as Error).message}`);
-    await refreshSettings();
-  } finally {
-    setSettingsBusy(false);
-  }
-});
-
 clipCreateButton.addEventListener("click", async () => {
   if (!selectedVideoPath) {
     appendLog("Create clip failed: no video selected.");
@@ -1842,9 +1789,7 @@ clipCreateButton.addEventListener("click", async () => {
   }
 
   const mode = clipModeSelect.value === "encode" ? "encode" : "copy";
-  const fallbackOutputDir = getDirectoryFromPath(selectedVideoPath) ?? "";
-  let outputDir = currentSettings ? getEffectiveOutputDirectory(selectedVideoPath) : fallbackOutputDir;
-  if (outputDir === "(auto)") outputDir = fallbackOutputDir;
+  const outputDir = getDirectoryFromPath(selectedVideoPath) ?? "";
 
   if (outputDir === "") {
     appendLog("Create clip failed: unable to resolve output directory.");
@@ -1896,9 +1841,9 @@ queuedClipsExportButton.addEventListener("click", async () => {
     for (let index = 0; index < clipsToExport.length; index += 1) {
       const clip = clipsToExport[index];
       const clipNumber = index + 1;
-      const outputDir = currentSettings ? getEffectiveOutputDirectory(clip.videoPath) : getDirectoryFromPath(clip.videoPath) ?? "";
+      const outputDir = getDirectoryFromPath(clip.videoPath) ?? "";
 
-      if (outputDir === "" || outputDir === "(auto)") {
+      if (outputDir === "") {
         failedCount += 1;
         appendLog(`Export queued clip ${clipNumber} failed: unable to resolve output directory.`);
         continue;
@@ -1957,11 +1902,23 @@ extractAudioButton.addEventListener("click", async () => {
     syncButtons();
     appendLog(`Audio extracted: ${audioPath}`);
     completeActionStatus();
+    appendLog("Choose where to save the extracted audio.");
+    await promptSaveExtractedAudio();
   } catch (error) {
     const message = (error as Error).message;
     appendLog(`Audio extraction failed: ${message}`);
     appendSetupHintForMissingDependency(message);
     failActionStatus(message);
+  } finally {
+    setBusy(false);
+  }
+});
+
+saveAudioButton.addEventListener("click", async () => {
+  setBusy(true);
+
+  try {
+    await promptSaveExtractedAudio();
   } finally {
     setBusy(false);
   }
@@ -1989,6 +1946,7 @@ generateCaptionsButton.addEventListener("click", async () => {
     refreshPaths();
     syncButtons();
     appendLog(`Captions generated: ${srtPath}, ${vttPath}`);
+    appendLog("Use Save SRT or Save VTT to choose where to keep the generated captions.");
     completeActionStatus();
   } catch (error) {
     const message = (error as Error).message;
@@ -2060,27 +2018,23 @@ saveVttButton.addEventListener("click", async () => {
   }
 });
 
-async function initSettingsPanel(): Promise<void> {
-  setSettingsBusy(true);
-
+async function initSettings(): Promise<void> {
   try {
     await refreshSettings();
   } catch (error) {
     appendLog(`Load settings failed: ${(error as Error).message}`);
-  } finally {
-    setSettingsBusy(false);
   }
 }
 
 setIdleActionStatus();
 applyThemeMode("system");
-syncRawLogVisibility();
+setLogDrawerWidth(logDrawerWidth);
 refreshPaths();
 renderCaptionSegments();
 renderQueuedClips();
 syncButtons();
 appendLog("Ready.");
-void initSettingsPanel();
+void initSettings();
 
 
 

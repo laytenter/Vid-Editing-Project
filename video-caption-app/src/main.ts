@@ -45,9 +45,6 @@ const APP_USER_MODEL_ID = "com.local.video-caption-app";
 
 const settingsStore = new Store<PersistedSettings>({
   defaults: {
-    outputDir: null,
-    saveWavToOutputDir: true,
-    saveCaptionsToOutputDir: false,
     themeMode: "system"
   }
 });
@@ -104,17 +101,11 @@ function getUniqueFilePath(directory: string, baseName: string, extension: strin
 }
 
 function getPersistedSettings(): PersistedSettings {
-  const outputDirValue = settingsStore.get("outputDir");
-  const outputDir =
-    typeof outputDirValue === "string" && outputDirValue.trim() !== "" ? path.resolve(outputDirValue) : null;
   const themeModeValue = settingsStore.get("themeMode");
   const themeMode =
     themeModeValue === "dark" || themeModeValue === "light" || themeModeValue === "system" ? themeModeValue : "system";
 
   return {
-    outputDir,
-    saveWavToOutputDir: settingsStore.get("saveWavToOutputDir") !== false,
-    saveCaptionsToOutputDir: settingsStore.get("saveCaptionsToOutputDir") === true,
     themeMode
   };
 }
@@ -127,23 +118,6 @@ function getAppSettings(): AppSettings {
 }
 
 function updatePersistedSettings(partial: Partial<PersistedSettings>): PersistedSettings {
-  if (Object.prototype.hasOwnProperty.call(partial, "outputDir")) {
-    const value = partial.outputDir;
-    if (typeof value === "string" && value.trim() !== "") {
-      settingsStore.set("outputDir", path.resolve(value));
-    } else {
-      settingsStore.set("outputDir", null);
-    }
-  }
-
-  if (typeof partial.saveWavToOutputDir === "boolean") {
-    settingsStore.set("saveWavToOutputDir", partial.saveWavToOutputDir);
-  }
-
-  if (typeof partial.saveCaptionsToOutputDir === "boolean") {
-    settingsStore.set("saveCaptionsToOutputDir", partial.saveCaptionsToOutputDir);
-  }
-
   if (partial.themeMode === "system" || partial.themeMode === "dark" || partial.themeMode === "light") {
     settingsStore.set("themeMode", partial.themeMode);
   }
@@ -151,13 +125,21 @@ function updatePersistedSettings(partial: Partial<PersistedSettings>): Persisted
   return getPersistedSettings();
 }
 
-function resolveDefaultSaveDirectory(mediaPathInput?: string | null): string {
-  const settings = getPersistedSettings();
-
-  if (settings.outputDir && existsSync(settings.outputDir)) {
-    return settings.outputDir;
+function sendSettingsToWindows(settings = getAppSettings()): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+      window.webContents.send("settings:changed", settings);
+    }
   }
+}
 
+function setThemeModeFromMenu(themeMode: PersistedSettings["themeMode"]): void {
+  updatePersistedSettings({ themeMode });
+  createApplicationMenu();
+  sendSettingsToWindows();
+}
+
+function resolveDefaultSaveDirectory(mediaPathInput?: string | null): string {
   if (typeof mediaPathInput === "string" && mediaPathInput.trim() !== "") {
     const mediaDir = path.dirname(path.resolve(mediaPathInput));
     if (existsSync(mediaDir)) {
@@ -264,21 +246,6 @@ async function promptAudioSelection(ownerWindow?: BrowserWindowType): Promise<st
   return path.resolve(result.filePaths[0]);
 }
 
-async function promptOutputFolder(ownerWindow?: BrowserWindowType): Promise<string | null> {
-  const result = await showOpenDialogForWindow(ownerWindow, {
-    title: "Choose Output Folder",
-    properties: ["openDirectory"]
-  });
-
-  if (result.canceled || result.filePaths.length === 0) {
-    return null;
-  }
-
-  const selectedDir = path.resolve(result.filePaths[0]);
-  updatePersistedSettings({ outputDir: selectedDir });
-  return selectedDir;
-}
-
 function sendMenuOpenVideo(videoPath: string): void {
   const window = getPrimaryWindow();
   if (!window || window.isDestroyed() || window.webContents.isDestroyed()) {
@@ -289,6 +256,7 @@ function sendMenuOpenVideo(videoPath: string): void {
 }
 
 function createApplicationMenu(): void {
+  const settings = getPersistedSettings();
   const template: MenuItemConstructorOptions[] = [
     {
       label: "File",
@@ -301,19 +269,6 @@ function createApplicationMenu(): void {
             if (videoPath) {
               sendMenuOpenVideo(videoPath);
             }
-          }
-        },
-        {
-          label: "Choose Output Folder...",
-          click: async () => {
-            await promptOutputFolder(getPrimaryWindow());
-          }
-        },
-        {
-          label: "Reveal Output Folder",
-          click: async () => {
-            const targetPath = resolveDefaultSaveDirectory(null);
-            await shell.openPath(targetPath);
           }
         },
         {
@@ -339,6 +294,34 @@ function createApplicationMenu(): void {
         { role: "copy" },
         { role: "paste" },
         { role: "selectAll" }
+      ]
+    },
+    {
+      label: "Settings",
+      submenu: [
+        {
+          label: "Appearance",
+          submenu: [
+            {
+              label: "System",
+              type: "radio",
+              checked: settings.themeMode === "system",
+              click: () => setThemeModeFromMenu("system")
+            },
+            {
+              label: "Dark",
+              type: "radio",
+              checked: settings.themeMode === "dark",
+              click: () => setThemeModeFromMenu("dark")
+            },
+            {
+              label: "Light",
+              type: "radio",
+              checked: settings.themeMode === "light",
+              click: () => setThemeModeFromMenu("light")
+            }
+          ]
+        }
       ]
     },
     {
@@ -478,11 +461,10 @@ app.whenReady().then(() => {
 
   ipcMain.handle("settings:set", async (_event, partial: Partial<PersistedSettings>): Promise<AppSettings> => {
     updatePersistedSettings(partial ?? {});
-    return getAppSettings();
-  });
-
-  ipcMain.handle("choose-output-folder", async (event): Promise<string | null> => {
-    return promptOutputFolder(getOwnerWindowFromEvent(event));
+    createApplicationMenu();
+    const settings = getAppSettings();
+    sendSettingsToWindows(settings);
+    return settings;
   });
 
   ipcMain.handle("open-path", async (_event, targetPath: unknown): Promise<boolean> => {
@@ -509,17 +491,8 @@ app.whenReady().then(() => {
 
   ipcMain.handle("extract-audio", async (event, videoPath: unknown): Promise<ExtractAudioResult> => {
     const resolvedVideoPath = normalizeExistingFile(videoPath, "videoPath");
-    const settings = getPersistedSettings();
-
-    let audioPath: string;
-    if (settings.saveWavToOutputDir) {
-      const outputDir = resolveDefaultSaveDirectory(resolvedVideoPath);
-      const baseName = getSafeBaseName(resolvedVideoPath);
-      audioPath = getUniqueFilePath(outputDir, baseName, ".wav");
-    } else {
-      const tempDir = resolveTempDir();
-      audioPath = path.resolve(tempDir, "audio.wav");
-    }
+    const tempDir = resolveTempDir();
+    const audioPath = getUniqueFilePath(tempDir, `${getSafeBaseName(resolvedVideoPath)}_audio`, ".wav");
 
     const args = [
       "-y",
@@ -605,9 +578,6 @@ app.whenReady().then(() => {
   ipcMain.handle("run-whisper", async (event, input: unknown): Promise<RunWhisperResult> => {
     const request = normalizeRunWhisperRequest(input);
     const audioPath = normalizeExistingFile(request.audioPath, "audioPath");
-    const normalizedSourcePath =
-      typeof request.sourcePath === "string" && request.sourcePath.trim() !== "" ? path.resolve(request.sourcePath) : null;
-    const baseName = getSafeBaseName(normalizedSourcePath ?? audioPath);
 
     const tempDir = resolveTempDir();
     const outputBase = path.resolve(tempDir, "captions");
@@ -631,29 +601,13 @@ app.whenReady().then(() => {
 
     const srtText = readFileSync(tempSrtPath, "utf8");
 
-    let srtPath = tempSrtPath;
-    let vttPath = tempVttPath;
-    const settings = getPersistedSettings();
-
-    if (settings.saveCaptionsToOutputDir) {
-      const outputDir = resolveDefaultSaveDirectory(normalizedSourcePath ?? audioPath);
-      const copiedSrtPath = getUniqueFilePath(outputDir, baseName, ".srt");
-      const copiedVttPath = getUniqueFilePath(outputDir, baseName, ".vtt");
-
-      copyFileSync(tempSrtPath, copiedSrtPath);
-      copyFileSync(tempVttPath, copiedVttPath);
-
-      srtPath = copiedSrtPath;
-      vttPath = copiedVttPath;
-    }
-
-    return { srtPath, vttPath, modelPath, srtText };
+    return { srtPath: tempSrtPath, vttPath: tempVttPath, modelPath, srtText };
   });
 
   ipcMain.handle("save-file-as", async (event, request: SaveFileAsRequest): Promise<string | null> => {
     const sourcePath = normalizeExistingFile(request?.sourcePath, "sourcePath");
     const sourceExt = path.extname(sourcePath).toLowerCase();
-    const expectedExt = sourceExt === ".srt" || sourceExt === ".vtt" ? sourceExt : "";
+    const expectedExt = sourceExt === ".srt" || sourceExt === ".vtt" || sourceExt === ".wav" ? sourceExt : "";
 
     const defaultFileName =
       typeof request?.defaultFileName === "string" && request.defaultFileName.trim() !== ""
@@ -666,10 +620,12 @@ app.whenReady().then(() => {
         ? [{ name: "SubRip (.srt)", extensions: ["srt"] }]
         : expectedExt === ".vtt"
           ? [{ name: "WebVTT (.vtt)", extensions: ["vtt"] }]
-          : undefined;
+          : expectedExt === ".wav"
+            ? [{ name: "Wave Audio (.wav)", extensions: ["wav"] }]
+            : undefined;
 
     const saveResult = await showSaveDialogForSender(event, {
-      title: "Save Captions As",
+      title: expectedExt === ".wav" ? "Save Audio As" : "Save Captions As",
       defaultPath: path.resolve(defaultDirectory, defaultFileName),
       filters
     });
