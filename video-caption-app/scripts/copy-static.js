@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 
 const outDir = path.resolve(__dirname, "..", "dist");
-const staticFiles = ["app-logo.svg", "index.html", "styles.css"];
+const staticFiles = ["app-logo.svg", "app-logo.ico", "index.html", "styles.css"];
 
 if (!fs.existsSync(outDir)) {
   fs.mkdirSync(outDir, { recursive: true });

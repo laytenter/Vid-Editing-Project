@@ -41,6 +41,8 @@ type BinaryName = "ffmpeg.exe" | "whisper.exe";
 type ToolName = ToolLogEntry["tool"];
 type StreamName = ToolLogEntry["stream"];
 
+const APP_USER_MODEL_ID = "com.local.video-caption-app";
+
 const settingsStore = new Store<PersistedSettings>({
   defaults: {
     outputDir: null,
@@ -53,6 +55,10 @@ const settingsStore = new Store<PersistedSettings>({
 function resolveBinaryPath(binaryName: BinaryName): string {
   const baseDir = app.isPackaged ? process.resourcesPath : app.getAppPath();
   return path.resolve(baseDir, "bin", binaryName);
+}
+
+function resolveAppIconPath(): string {
+  return path.resolve(__dirname, process.platform === "win32" ? "app-logo.ico" : "app-logo.svg");
 }
 
 function resolveTempDir(): string {
@@ -447,6 +453,7 @@ function createWindow(): void {
   const mainWindow = new BrowserWindow({
     width: 980,
     height: 760,
+    icon: resolveAppIconPath(),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -455,6 +462,10 @@ function createWindow(): void {
   });
 
   void mainWindow.loadFile(path.join(__dirname, "index.html"));
+}
+
+if (process.platform === "win32") {
+  app.setAppUserModelId(APP_USER_MODEL_ID);
 }
 
 app.whenReady().then(() => {
