@@ -711,14 +711,6 @@ function renderCaptionSelectionSummary(): void {
   const anchorSegment = findCaptionSegment(captionRangeAnchorIndex);
   const focusSegment = findCaptionSegment(captionRangeFocusIndex);
   captionClearSelectionButton.hidden = !anchorSegment;
-
-  if (!anchorSegment) {
-    captionSelectionSummaryNode.hidden = true;
-    captionSelectionSummaryNode.replaceChildren();
-    return;
-  }
-
-  captionSelectionSummaryNode.hidden = false;
   captionSelectionSummaryNode.replaceChildren();
 
   const titleNode = document.createElement("div");
@@ -726,16 +718,23 @@ function renderCaptionSelectionSummary(): void {
   const detailNode = document.createElement("div");
   detailNode.className = "caption-selection-detail";
 
-  if (!captionRangeComplete || !focusSegment) {
-    titleNode.textContent = `Start: ${anchorSegment.start} - ${getShortCaptionPreview(anchorSegment.text)}`;
-    detailNode.textContent = "Click another segment to set the end.";
+  if (!anchorSegment) {
+    captionSelectionSummaryNode.dataset.state = "neutral";
+    titleNode.textContent = "No range selected";
+    detailNode.textContent = "Click a caption to choose the start.";
+  } else if (!captionRangeComplete || !focusSegment) {
+    captionSelectionSummaryNode.dataset.state = "pending";
+    titleNode.textContent = "Start selected — click another caption to choose the end.";
+    detailNode.textContent = `${anchorSegment.start} — ${getShortCaptionPreview(anchorSegment.text)}`;
   } else {
     const startSegment = anchorSegment.index <= focusSegment.index ? anchorSegment : focusSegment;
     const endSegment = anchorSegment.index <= focusSegment.index ? focusSegment : anchorSegment;
-    titleNode.textContent = `Range: ${startSegment.start} -> ${endSegment.end}`;
+    captionSelectionSummaryNode.dataset.state = "complete";
+    titleNode.textContent = `Selected range: ${startSegment.start} → ${endSegment.end}`;
     detailNode.textContent = `${getShortCaptionPreview(startSegment.text)} / ${getShortCaptionPreview(endSegment.text)}`;
   }
 
+  detailNode.title = detailNode.textContent;
   captionSelectionSummaryNode.append(titleNode, detailNode);
 }
 
@@ -1017,6 +1016,20 @@ function getQueuedClipPreview(startTime: string, endTime: string): string {
   return `${getShortCaptionPreview(selectedSegments[0].text)} / ${getShortCaptionPreview(selectedSegments[selectedSegments.length - 1].text)}`;
 }
 
+function appendCaptionEmptyState(title: string, detail: string): void {
+  const emptyNode = document.createElement("div");
+  emptyNode.className = "caption-segments-empty";
+
+  const titleNode = document.createElement("strong");
+  titleNode.textContent = title;
+
+  const detailNode = document.createElement("span");
+  detailNode.textContent = detail;
+
+  emptyNode.append(titleNode, detailNode);
+  captionSegmentListNode.appendChild(emptyNode);
+}
+
 function renderCaptionSegments(): void {
   const captionLabel = captionSegments.length === 1 ? "caption" : "captions";
   captionSegmentsCountNode.textContent = `${captionSegments.length} ${captionLabel}`;
@@ -1030,28 +1043,26 @@ function renderCaptionSegments(): void {
   captionSearchCountNode.textContent =
     lowerSearchQuery === "" ? "" : `${visibleSegments.length} ${visibleSegments.length === 1 ? "match" : "matches"}`;
   const rangeStartIndex =
-    captionRangeAnchorIndex !== null && captionRangeFocusIndex !== null
+    captionRangeComplete && captionRangeAnchorIndex !== null && captionRangeFocusIndex !== null
       ? Math.min(captionRangeAnchorIndex, captionRangeFocusIndex)
       : null;
   const rangeEndIndex =
-    captionRangeAnchorIndex !== null && captionRangeFocusIndex !== null
+    captionRangeComplete && captionRangeAnchorIndex !== null && captionRangeFocusIndex !== null
       ? Math.max(captionRangeAnchorIndex, captionRangeFocusIndex)
       : null;
+  const pendingStartIndex = !captionRangeComplete ? captionRangeAnchorIndex : null;
 
   if (captionSegments.length === 0) {
-    const emptyNode = document.createElement("p");
-    emptyNode.className = "caption-segments-empty";
-    emptyNode.textContent = "Generate captions to see segments.";
-    captionSegmentListNode.appendChild(emptyNode);
+    appendCaptionEmptyState("No captions yet", "Select or extract audio, then click Generate Captions.");
     renderCaptionSelectionSummary();
     return;
   }
 
   if (visibleSegments.length === 0) {
-    const emptyNode = document.createElement("p");
-    emptyNode.className = "caption-segments-empty";
-    emptyNode.textContent = "No matching captions.";
-    captionSegmentListNode.appendChild(emptyNode);
+    appendCaptionEmptyState(
+      "No matching captions",
+      `No captions match “${searchQuery}”. Clear or change the search to show the hidden captions.`
+    );
     renderCaptionSelectionSummary();
     return;
   }
@@ -1061,14 +1072,21 @@ function renderCaptionSegments(): void {
     row.className = "caption-segment-row";
     row.tabIndex = 0;
     row.setAttribute("role", "button");
-    row.classList.toggle("is-range-start", rangeStartIndex !== null && segment.index === rangeStartIndex);
-    row.classList.toggle("is-range-end", rangeEndIndex !== null && segment.index === rangeEndIndex);
-    row.classList.toggle(
-      "is-in-range",
-      rangeStartIndex !== null && rangeEndIndex !== null && segment.index >= rangeStartIndex && segment.index <= rangeEndIndex
-    );
-    row.classList.toggle("is-playback-active", activePlaybackSegmentIndex === segment.index);
-    row.classList.toggle("is-edited", segment.edited === true);
+    row.title = "Click to set clip range start or end";
+    const isRangeStart =
+      (pendingStartIndex !== null && segment.index === pendingStartIndex) ||
+      (rangeStartIndex !== null && segment.index === rangeStartIndex);
+    const isRangeEnd = rangeEndIndex !== null && segment.index === rangeEndIndex;
+    const isInsideRange =
+      rangeStartIndex !== null && rangeEndIndex !== null && segment.index > rangeStartIndex && segment.index < rangeEndIndex;
+    const isPlaybackActive = activePlaybackSegmentIndex === segment.index;
+    const isEdited = segment.edited === true;
+
+    row.classList.toggle("is-range-start", isRangeStart);
+    row.classList.toggle("is-range-end", isRangeEnd);
+    row.classList.toggle("is-in-range", isInsideRange);
+    row.classList.toggle("is-playback-active", isPlaybackActive);
+    row.classList.toggle("is-edited", isEdited);
     row.classList.toggle("is-editing", editingCaptionIndex === segment.index);
 
     const activateSegment = () => {
@@ -1096,6 +1114,32 @@ function renderCaptionSegments(): void {
     endNode.textContent = segment.end;
 
     timeNode.append(startNode, endNode);
+
+    const badgesNode = document.createElement("span");
+    badgesNode.className = "caption-segment-badges";
+
+    const appendBadge = (label: string, kind: string) => {
+      const badgeNode = document.createElement("span");
+      badgeNode.className = `caption-segment-badge is-${kind}`;
+      badgeNode.textContent = label;
+      badgesNode.appendChild(badgeNode);
+    };
+
+    if (isRangeStart) {
+      appendBadge("Start", "start");
+    }
+    if (isRangeEnd) {
+      appendBadge("End", "end");
+    }
+    if (isPlaybackActive) {
+      appendBadge("Playing", "playing");
+    }
+    if (isEdited) {
+      appendBadge("Edited", "edited");
+    }
+    if (badgesNode.childElementCount > 0) {
+      timeNode.appendChild(badgesNode);
+    }
 
     if (editingCaptionIndex === segment.index) {
       const editorNode = document.createElement("textarea");

@@ -513,6 +513,13 @@ input[type="checkbox"] {
   font-size: 0.82rem;
 }
 
+.caption-range-instruction {
+  margin: 0 0 8px;
+  color: var(--muted-subtle);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
 .caption-selection-summary {
   display: grid;
   gap: 5px;
@@ -523,14 +530,29 @@ input[type="checkbox"] {
   background: var(--surface-soft);
 }
 
+.caption-selection-summary[data-state="pending"] {
+  border-color: var(--primary-strong);
+  background: var(--surface-selected);
+  box-shadow: inset 4px 0 0 var(--primary);
+}
+
+.caption-selection-summary[data-state="complete"] {
+  border-color: var(--success);
+  background: var(--surface-range);
+  box-shadow: inset 4px 0 0 var(--success);
+}
+
 .caption-selection-title {
   color: var(--text-strong);
   font-weight: 700;
 }
 
 .caption-selection-detail {
+  overflow: hidden;
   color: var(--muted);
   font-size: 0.9rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .caption-search-row {
@@ -709,16 +731,29 @@ input[type="checkbox"] {
 
 .captions-card {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
   gap: 0;
 }
 
 .caption-segments-empty {
+  display: grid;
+  gap: 5px;
   margin: 0;
+  padding: 18px;
+  border: 1px dashed var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-soft);
   color: var(--muted-subtle);
+  line-height: 1.45;
+  text-align: center;
+}
+
+.caption-segments-empty strong {
+  color: var(--text-strong);
 }
 
 .caption-segment-row {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(7.5rem, 8.5rem) minmax(0, 1fr) auto;
   align-items: center;
@@ -732,11 +767,34 @@ input[type="checkbox"] {
   cursor: pointer;
   font: inherit;
   text-align: left;
+  transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+}
+
+.caption-segment-row::after {
+  position: absolute;
+  top: 50%;
+  right: 64px;
+  color: var(--muted-subtle);
+  content: "Select";
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  opacity: 0;
+  pointer-events: none;
+  text-transform: uppercase;
+  transform: translateY(-50%);
+  transition: opacity 120ms ease;
 }
 
 .caption-segment-row:hover {
   border-color: var(--primary-strong);
   background: var(--surface-soft);
+  transform: translateY(-1px);
+}
+
+.caption-segment-row:hover::after,
+.caption-segment-row:focus-visible::after {
+  opacity: 0.72;
 }
 
 .caption-segment-row:focus-visible {
@@ -747,30 +805,38 @@ input[type="checkbox"] {
 .caption-segment-row.is-in-range {
   border-color: var(--border-range);
   background: var(--surface-range);
+  box-shadow: inset 3px 0 0 var(--border-range);
 }
 
-.caption-segment-row.is-range-start,
-.caption-segment-row.is-range-end {
+.caption-segment-row.is-range-start {
   border-color: var(--primary);
   background: var(--surface-selected);
-  box-shadow: inset 4px 0 0 var(--primary);
+  box-shadow: inset 5px 0 0 var(--primary);
 }
 
-.caption-segment-row.is-range-start.is-range-end {
-  box-shadow: inset 4px 0 0 var(--primary);
+.caption-segment-row.is-range-end {
+  border-color: var(--success);
+  background: var(--surface-selected);
+  box-shadow: inset 5px 0 0 var(--success);
 }
 
 .caption-segment-row.is-playback-active {
-  outline: 2px solid var(--success);
-  outline-offset: -2px;
+  outline: 2px solid var(--warning-text);
+  outline-offset: -3px;
 }
 
 .caption-segment-row.is-edited {
-  border-left-color: var(--success);
+  border-right: 4px solid var(--success);
 }
 
 .caption-segment-row.is-editing {
   cursor: default;
+}
+
+.caption-segment-row.is-editing::after,
+.caption-segment-row.is-range-start::after,
+.caption-segment-row.is-range-end::after {
+  display: none;
 }
 
 .caption-segment-time {
@@ -782,6 +848,48 @@ input[type="checkbox"] {
   font-size: 0.82rem;
   line-height: 1.35;
   white-space: nowrap;
+}
+
+.caption-segment-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 3px;
+  white-space: normal;
+}
+
+.caption-segment-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--text-strong);
+  font-family: "Segoe UI", sans-serif;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.caption-segment-badge.is-start {
+  border-color: var(--primary-strong);
+  background: var(--surface-selected);
+  color: var(--primary);
+}
+
+.caption-segment-badge.is-end,
+.caption-segment-badge.is-edited {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.caption-segment-badge.is-playing {
+  border-color: var(--warning-text);
+  background: var(--warning-bg);
+  color: var(--warning-text);
 }
 
 .caption-segment-text {

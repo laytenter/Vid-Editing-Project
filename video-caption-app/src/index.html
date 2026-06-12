@@ -90,13 +90,20 @@
         <button id="captionClearSelectionButton" class="caption-clear-selection" type="button" hidden>Clear selection</button>
       </div>
     </div>
-    <div id="captionSelectionSummary" class="caption-selection-summary" hidden></div>
+    <p class="caption-range-instruction">Click a caption to set range start, then click another caption to set range end.</p>
+    <div id="captionSelectionSummary" class="caption-selection-summary" data-state="neutral" aria-live="polite">
+      <div class="caption-selection-title">No range selected</div>
+      <div class="caption-selection-detail">Click a caption to choose the start.</div>
+    </div>
     <div class="caption-search-row">
       <input id="captionSearchInput" aria-label="Search captions" placeholder="Search captions..." />
       <span id="captionSearchCount" class="caption-search-count"></span>
     </div>
     <div id="captionSegmentList" class="caption-segments-list">
-      <p class="caption-segments-empty">Generate captions to see segments.</p>
+      <div class="caption-segments-empty">
+        <strong>No captions yet</strong>
+        <span>Select or extract audio, then click Generate Captions.</span>
+      </div>
     </div>
   </section>
   </div>
