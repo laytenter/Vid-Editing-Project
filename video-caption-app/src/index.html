@@ -30,25 +30,42 @@
       </div>
       <span id="captionSourceStatus" class="status-pill" data-state="idle">No source selected</span>
     </div>
+    <div id="sessionNotice" class="session-notice" data-state="restored" role="status" hidden>
+      <strong id="sessionNoticeTitle">Previous project restored</strong>
+      <span id="sessionNoticeDetail"></span>
+    </div>
     <div id="dropZone">Drop video or audio here</div>
     <div class="actions source-actions">
-      <button id="selectVideoButton">Upload Video</button>
-      <button id="selectAudioButton">Upload Audio</button>
-      <button id="extractAudioButton" disabled>Extract Audio</button>
-      <button id="generateCaptionsButton" disabled>Generate Captions</button>
-      <button id="saveAudioButton" disabled>Save Audio</button>
+      <div class="source-action-group">
+        <span class="source-action-label">1. Select source</span>
+        <div class="source-action-buttons">
+          <button id="selectVideoButton">Upload Video</button>
+          <button id="selectAudioButton">Upload Audio</button>
+        </div>
+      </div>
+      <div class="source-action-group">
+        <span class="source-action-label">2. Process source</span>
+        <div class="source-action-buttons">
+          <button id="extractAudioButton" disabled>Extract Audio</button>
+          <button id="generateCaptionsButton" disabled>Generate Captions</button>
+        </div>
+      </div>
+      <button id="saveAudioButton" class="secondary-button source-save-button" disabled>Save extracted audio</button>
     </div>
   </section>
 
-  <section class="paths action-status-panel workspace-card compact-card" aria-live="polite">
+  <section id="actionStatusPanel" class="paths action-status-panel workspace-card compact-card" data-state="idle" aria-live="polite">
     <div class="action-status-header">
-      <span id="actionStatus" class="label">Idle</span>
+      <div class="action-status-heading">
+        <span class="action-panel-label">Activity</span>
+        <span id="actionStatus" class="action-status-state">Idle</span>
+      </div>
       <div class="action-status-controls">
-        <span id="actionProgressText" class="action-progress-text">Idle</span>
+        <span id="actionProgressText" class="action-progress-text">Ready</span>
         <button id="cancelActionButton" class="cancel-action-button" type="button" hidden>Cancel</button>
       </div>
     </div>
-    <div id="actionProgressTrack" class="action-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" title="Action progress">
+    <div id="actionProgressTrack" class="action-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" title="Action progress" hidden>
       <div id="actionProgressBar" class="action-progress-bar"></div>
     </div>
   </section>
@@ -85,8 +102,10 @@
       <span class="label">Caption Segments</span>
       <div class="caption-segments-header-actions">
         <span id="captionSegmentsCount" class="caption-segments-count">0 captions</span>
-        <button id="saveSrtButton" class="caption-save-button" type="button" disabled>Save SRT</button>
-        <button id="saveVttButton" class="caption-save-button" type="button" disabled>Save VTT</button>
+        <div class="caption-export-actions" aria-label="Save captions">
+          <button id="saveSrtButton" class="caption-save-button" type="button" disabled>Save SRT</button>
+          <button id="saveVttButton" class="caption-save-button" type="button" disabled>Save VTT</button>
+        </div>
         <button id="captionClearSelectionButton" class="caption-clear-selection" type="button" hidden>Clear selection</button>
       </div>
     </div>

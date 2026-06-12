@@ -31,11 +31,15 @@ const previewStatusNode = mustGet<HTMLElement>("previewStatus");
 const previewVideoNode = mustGet<HTMLVideoElement>("previewVideo");
 const previewAudioNode = mustGet<HTMLAudioElement>("previewAudio");
 const previewEmptyNode = mustGet<HTMLElement>("previewEmpty");
+const actionStatusPanelNode = mustGet<HTMLElement>("actionStatusPanel");
 const actionStatusNode = mustGet<HTMLElement>("actionStatus");
 const actionProgressTrackNode = mustGet<HTMLElement>("actionProgressTrack");
 const actionProgressBarNode = mustGet<HTMLElement>("actionProgressBar");
 const actionProgressTextNode = mustGet<HTMLElement>("actionProgressText");
 const cancelActionButton = mustGet<HTMLButtonElement>("cancelActionButton");
+const sessionNoticeNode = mustGet<HTMLElement>("sessionNotice");
+const sessionNoticeTitleNode = mustGet<HTMLElement>("sessionNoticeTitle");
+const sessionNoticeDetailNode = mustGet<HTMLElement>("sessionNoticeDetail");
 
 const selectedVideoPathNode = mustGet<HTMLElement>("selectedVideoPath");
 const audioPathNode = mustGet<HTMLElement>("audioPath");
@@ -102,7 +106,6 @@ interface CaptionSegment {
 interface ActiveAction {
   kind: ActiveActionKind;
   label: string;
-  startedAtMs: number;
   totalDurationSeconds: number | null;
 }
 
@@ -141,6 +144,7 @@ let logRenderScheduled = false;
 let captionSegments: CaptionSegment[] = [];
 let queuedClips: QueuedClip[] = [];
 let nextQueuedClipId = 1;
+let activeQueuedClipId: number | null = null;
 let activeAction: ActiveAction | null = null;
 let whisperStdoutBuffer = "";
 let captionSegmentUserScrolledUp = false;
@@ -387,6 +391,14 @@ function refreshPaths(): void {
   updateMediaPreview();
 }
 
+function showSessionNotice(title: string, detail: string, state: "restored" | "warning" | "reset"): void {
+  sessionNoticeTitleNode.textContent = title;
+  sessionNoticeDetailNode.textContent = detail;
+  sessionNoticeDetailNode.title = detail;
+  sessionNoticeNode.dataset.state = state;
+  sessionNoticeNode.hidden = false;
+}
+
 function isNoisyFfmpegProgressLine(message: string): boolean {
   const line = message.trim().toLowerCase();
   return line.startsWith("size=") || (line.includes("time=") && line.includes("bitrate="));
@@ -422,21 +434,6 @@ function getClipDurationSeconds(startTime: string, endTime: string): number | nu
   }
 
   return endSeconds - startSeconds;
-}
-
-function formatRemainingTime(secondsInput: number): string {
-  const totalSeconds = Math.max(0, Math.ceil(secondsInput));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  const paddedMinutes = String(minutes).padStart(2, "0");
-  const paddedSeconds = String(seconds).padStart(2, "0");
-
-  if (hours > 0) {
-    return `${String(hours).padStart(2, "0")}:${paddedMinutes}:${paddedSeconds}`;
-  }
-
-  return `${paddedMinutes}:${paddedSeconds}`;
 }
 
 function parseFfmpegDurationSeconds(message: string): number | null {
@@ -489,8 +486,13 @@ function parseWhisperCaptionLine(line: string): CaptionSegment | null {
 
 function setActionStatus(label: string, text: string, mode: ActionStatusMode, percent = 0): void {
   const clampedPercent = clampNumber(percent, 0, 100);
+  const showProgressTrack = mode === "indeterminate" || mode === "determinate";
+  actionStatusPanelNode.dataset.state = mode;
   actionStatusNode.textContent = label;
+  actionStatusNode.title = label;
   actionProgressTextNode.textContent = text;
+  actionProgressTextNode.title = text;
+  actionProgressTrackNode.hidden = !showProgressTrack;
   actionProgressBarNode.classList.toggle("is-indeterminate", mode === "indeterminate");
   actionProgressBarNode.classList.toggle("is-complete", mode === "done");
   actionProgressBarNode.classList.toggle("is-failed", mode === "failed");
@@ -509,7 +511,7 @@ function setActionStatus(label: string, text: string, mode: ActionStatusMode, pe
 function setIdleActionStatus(): void {
   activeAction = null;
   isCancelling = false;
-  setActionStatus("Idle", "Idle", "idle", 0);
+  setActionStatus("Idle", "Ready", "idle", 0);
   syncButtons();
 }
 
@@ -522,7 +524,6 @@ function startActionStatus(kind: ActiveActionKind, label: string, totalDurationS
   activeAction = {
     kind,
     label,
-    startedAtMs: Date.now(),
     totalDurationSeconds
   };
   isCancelling = false;
@@ -542,7 +543,6 @@ function setActiveActionStage(label: string, totalDurationSeconds: number | null
   }
 
   activeAction.label = label;
-  activeAction.startedAtMs = Date.now();
   activeAction.totalDurationSeconds = totalDurationSeconds;
 
   if (totalDurationSeconds !== null) {
@@ -559,19 +559,7 @@ function updateDeterminateActionProgress(percentInput: number): void {
   }
 
   const percent = clampNumber(percentInput, 0, 100);
-  const fraction = percent / 100;
-  let text = `${Math.round(percent)}%`;
-
-  if (fraction > 0 && fraction < 1) {
-    const elapsedWallSeconds = (Date.now() - activeAction.startedAtMs) / 1000;
-    const remainingSeconds = elapsedWallSeconds / fraction - elapsedWallSeconds;
-
-    if (Number.isFinite(remainingSeconds) && remainingSeconds >= 0) {
-      text = `${text} - about ${formatRemainingTime(remainingSeconds)} remaining`;
-    }
-  }
-
-  setActionStatus(activeAction.label, text, "determinate", percent);
+  setActionStatus(activeAction.label, `${Math.round(percent)}%`, "determinate", percent);
 }
 
 function updateFfmpegActionProgress(message: string): void {
@@ -894,21 +882,21 @@ function updateActionProgressFromToolLog(entry: { tool: ToolName; stream?: Strea
 function completeActionStatus(): void {
   activeAction = null;
   isCancelling = false;
-  setActionStatus("Done", "Done", "done", 100);
+  setActionStatus("Complete", "Task finished", "done", 100);
   syncButtons();
 }
 
 function failActionStatus(message: string): void {
   activeAction = null;
   isCancelling = false;
-  setActionStatus(`Failed: ${message}`, "Failed", "failed", 100);
+  setActionStatus("Failed", message, "failed", 100);
   syncButtons();
 }
 
-function cancelActionStatus(): void {
+function cancelActionStatus(detail = "Current task stopped", label = "Cancelled"): void {
   activeAction = null;
   isCancelling = false;
-  setActionStatus("Cancelled", "Cancelled", "cancelled", 100);
+  setActionStatus(label, detail, "cancelled", 100);
   syncButtons();
 }
 
@@ -1256,6 +1244,11 @@ function renderQueuedClips(): void {
   for (const clip of queuedClips) {
     const row = document.createElement("div");
     row.className = "queued-clip-row";
+    const isExporting = clip.id === activeQueuedClipId;
+    row.classList.toggle("is-exporting", isExporting);
+    if (isExporting) {
+      row.setAttribute("aria-current", "step");
+    }
 
     const metadataNode = document.createElement("div");
     metadataNode.className = "queued-clip-metadata";
@@ -1269,6 +1262,12 @@ function renderQueuedClips(): void {
     modeNode.textContent = clip.mode === "encode" ? "Encode" : "Copy";
 
     metadataNode.append(timeNode, modeNode);
+    if (isExporting) {
+      const exportingNode = document.createElement("span");
+      exportingNode.className = "queued-clip-exporting";
+      exportingNode.textContent = "Exporting";
+      metadataNode.appendChild(exportingNode);
+    }
 
     const previewNode = document.createElement("div");
     previewNode.className = "queued-clip-preview";
@@ -1288,6 +1287,11 @@ function renderQueuedClips(): void {
 
     row.append(metadataNode, previewNode, removeButton);
     queuedClipsListNode.appendChild(row);
+    if (isExporting) {
+      window.requestAnimationFrame(() => {
+        row.scrollIntoView({ block: "nearest" });
+      });
+    }
   }
 
   syncButtons();
@@ -1411,6 +1415,8 @@ function scheduleCaptionProjectSave(): void {
 
 async function restoreCaptionProject(): Promise<void> {
   let restoredProjectChanged = false;
+  const missingPaths: string[] = [];
+  let omittedQueuedClipCount = 0;
 
   try {
     const session = await window.videoTools.getCaptionProject();
@@ -1418,7 +1424,7 @@ async function restoreCaptionProject(): Promise<void> {
       return;
     }
 
-    const restoreExistingPath = async (savedPath: string | null): Promise<string | null> => {
+    const restoreExistingPath = async (savedPath: string | null, label: string): Promise<string | null> => {
       if (!savedPath) {
         return null;
       }
@@ -1428,14 +1434,15 @@ async function restoreCaptionProject(): Promise<void> {
       }
 
       restoredProjectChanged = true;
+      missingPaths.push(label);
       return null;
     };
 
-    selectedVideoPath = await restoreExistingPath(session.selectedVideoPath);
-    audioPath = await restoreExistingPath(session.audioPath);
+    selectedVideoPath = await restoreExistingPath(session.selectedVideoPath, "video");
+    audioPath = await restoreExistingPath(session.audioPath, "audio");
     audioSourceKind = audioPath ? session.audioSourceKind : null;
-    srtPath = await restoreExistingPath(session.srtPath);
-    vttPath = await restoreExistingPath(session.vttPath);
+    srtPath = await restoreExistingPath(session.srtPath, "SRT");
+    vttPath = await restoreExistingPath(session.vttPath, "VTT");
 
     const savedQueuedClips = Array.isArray(session.queuedClips) ? session.queuedClips : [];
     const restoredQueuedClips = await Promise.all(
@@ -1445,6 +1452,7 @@ async function restoreCaptionProject(): Promise<void> {
         }
 
         restoredProjectChanged = true;
+        omittedQueuedClipCount += 1;
         return null;
       })
     );
@@ -1460,6 +1468,43 @@ async function restoreCaptionProject(): Promise<void> {
     refreshPaths();
     renderQueuedClips();
     syncButtons();
+    const restoredItems: string[] = [];
+    if (captionSegments.length > 0) {
+      restoredItems.push(`${captionSegments.length} ${captionSegments.length === 1 ? "caption" : "captions"}`);
+    }
+    if (queuedClips.length > 0) {
+      restoredItems.push(`${queuedClips.length} queued ${queuedClips.length === 1 ? "clip" : "clips"}`);
+    }
+    if (clipStartInput.value || clipEndInput.value) {
+      restoredItems.push("clip fields");
+    }
+    if (selectedVideoPath || audioPath) {
+      restoredItems.push("available media");
+    }
+
+    const restoredSummary =
+      restoredItems.length > 0 ? `${restoredItems.join(", ")} restored.` : "Previous project state restored.";
+    if (restoredProjectChanged) {
+      const missingSources = missingPaths.filter((label) => label === "video" || label === "audio");
+      const missingArtifacts = missingPaths.filter((label) => label === "SRT" || label === "VTT");
+      const missingDetail =
+        missingSources.length > 0
+          ? ` Reselect the missing ${missingSources.join(" and ")} ${missingSources.length === 1 ? "source" : "sources"} to continue.`
+          : "";
+      const artifactDetail =
+        missingArtifacts.length > 0 ? ` Missing ${missingArtifacts.join(" and ")} paths were omitted.` : "";
+      const omittedQueueDetail =
+        omittedQueuedClipCount > 0
+          ? ` ${omittedQueuedClipCount} queued ${omittedQueuedClipCount === 1 ? "clip was" : "clips were"} omitted because ${omittedQueuedClipCount === 1 ? "its video is" : "their videos are"} unavailable.`
+          : "";
+      showSessionNotice(
+        "Previous project restored with missing files",
+        `${restoredSummary}${missingDetail}${artifactDetail}${omittedQueueDetail}`,
+        "warning"
+      );
+    } else if (restoredItems.length > 0) {
+      showSessionNotice("Previous project restored", restoredSummary, "restored");
+    }
     appendLog(
       restoredProjectChanged
         ? "Restored previous caption project; missing media paths were omitted."
@@ -1528,29 +1573,58 @@ function appendSetupHintForMissingDependency(errorMessage: string): void {
 }
 
 function applySelectedVideo(videoPath: string): void {
+  const clearedPreviousWork =
+    captionSegments.length > 0 || queuedClips.length > 0 || clipStartInput.value !== "" || clipEndInput.value !== "";
   selectedVideoPath = videoPath;
   audioPath = null;
   srtPath = null;
   vttPath = null;
   audioSourceKind = null;
+  clipStartInput.value = "";
+  clipEndInput.value = "";
   setCaptionSegments([]);
   clearQueuedClips();
 
   refreshPaths();
   syncButtons();
+  showSessionNotice(
+    "New video selected",
+    clearedPreviousWork
+      ? "Previous captions, clip fields, and queued clips were cleared."
+      : "Extract audio to continue with caption generation.",
+    "reset"
+  );
+  if (!activeAction) {
+    setIdleActionStatus();
+  }
   appendLog(`Selected video: ${selectedVideoPath}`);
   scheduleCaptionProjectSave();
 }
 
 function applySelectedAudio(nextAudioPath: string): void {
+  const clearedPreviousWork =
+    captionSegments.length > 0 || queuedClips.length > 0 || clipStartInput.value !== "" || clipEndInput.value !== "";
   audioPath = nextAudioPath;
   srtPath = null;
   vttPath = null;
   audioSourceKind = "uploaded";
+  clipStartInput.value = "";
+  clipEndInput.value = "";
   setCaptionSegments([]);
+  clearQueuedClips();
 
   refreshPaths();
   syncButtons();
+  showSessionNotice(
+    "New audio selected",
+    clearedPreviousWork
+      ? "Previous captions, clip fields, and queued clips were cleared."
+      : "Generate captions when you are ready.",
+    "reset"
+  );
+  if (!activeAction) {
+    setIdleActionStatus();
+  }
   appendLog(`Selected audio: ${audioPath}`);
   scheduleCaptionProjectSave();
 }
@@ -1654,11 +1728,17 @@ cancelActionButton.addEventListener("click", async () => {
     if (!cancelled) {
       appendLog("Cancellation skipped: no active media process.");
       isCancelling = false;
+      if (activeAction) {
+        setActionStatus(activeAction.label, "Finishing...", "indeterminate", 0);
+      }
       syncButtons();
     }
   } catch (error) {
     appendLog(`Cancellation request failed: ${(error as Error).message}`);
     isCancelling = false;
+    if (activeAction) {
+      setActionStatus(activeAction.label, "Cancellation failed; task still running", "indeterminate", 0);
+    }
     syncButtons();
   }
 });
@@ -1988,6 +2068,8 @@ queuedClipsExportButton.addEventListener("click", async () => {
     for (let index = 0; index < clipsToExport.length; index += 1) {
       const clip = clipsToExport[index];
       const clipNumber = index + 1;
+      activeQueuedClipId = clip.id;
+      renderQueuedClips();
       const outputDir = getDirectoryFromPath(clip.videoPath) ?? "";
 
       if (outputDir === "") {
@@ -2028,12 +2110,17 @@ queuedClipsExportButton.addEventListener("click", async () => {
     }
 
     if (cancelled) {
-      cancelActionStatus();
+      const cancelledMessage = `Batch export cancelled after ${exportedCount} of ${totalClips} clips exported. Remaining clips were not exported.`;
+      appendLog(cancelledMessage);
+      cancelActionStatus(`${exportedCount}/${totalClips} exported; remaining clips stopped`, "Batch cancelled");
     } else {
       activeAction = null;
-      setActionStatus("Done", `Done (${exportedCount} exported, ${failedCount} failed)`, "done", 100);
+      isCancelling = false;
+      setActionStatus("Complete", `${exportedCount} exported, ${failedCount} failed`, "done", 100);
+      appendLog(`Batch export complete: ${exportedCount} exported, ${failedCount} failed.`);
     }
   } finally {
+    activeQueuedClipId = null;
     setBusy(false);
     renderQueuedClips();
   }

@@ -28,4 +28,4 @@ npm start
 
 Caption and extracted-audio saves use a save dialog. Clips are exported automatically beside the selected video. All media processing stays local.
 
-Active FFmpeg or Whisper work can be cancelled from the status panel. The most recent caption project is restored automatically after restarting the app.
+Active FFmpeg or Whisper work can be cancelled from the compact Activity panel. The most recent caption project is restored automatically after restarting the app.

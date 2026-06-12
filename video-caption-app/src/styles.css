@@ -271,6 +271,44 @@ h2 {
   color: var(--warning-text);
 }
 
+.session-notice {
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.session-notice strong {
+  color: var(--text-strong);
+  font-size: 0.8rem;
+}
+
+.session-notice span {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.session-notice[data-state="warning"] {
+  border-color: var(--warning-text);
+  background: var(--warning-bg);
+}
+
+.session-notice[data-state="warning"] strong {
+  color: var(--warning-text);
+}
+
+.session-notice[data-state="reset"] {
+  border-color: var(--primary-strong);
+  background: var(--surface-selected);
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -290,20 +328,45 @@ h2 {
 
 .source-actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
   margin-bottom: 0;
 }
 
-.source-actions #saveAudioButton {
-  grid-column: 1 / -1;
+.source-action-group {
+  display: grid;
+  gap: 6px;
 }
 
-.source-actions button {
-  flex: none;
+.source-action-label {
+  color: var(--muted-subtle);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.source-action-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.source-action-buttons button,
+.source-save-button {
   min-height: 36px;
   padding: 7px 10px;
   font-size: 0.8rem;
+}
+
+.secondary-button {
+  border-color: var(--border-soft);
+  background: var(--surface);
+  color: var(--primary);
+}
+
+.source-save-button {
+  width: 100%;
 }
 
 .clip-card .actions {
@@ -396,11 +459,25 @@ input[type="checkbox"] {
 
 .action-status-panel {
   display: grid;
-  gap: 10px;
+  gap: 6px;
+  border-color: var(--border-soft);
+  background: var(--surface-soft);
+}
+
+.action-status-panel[data-state="done"] {
+  border-color: var(--success);
+}
+
+.action-status-panel[data-state="failed"] {
+  border-color: var(--danger);
+}
+
+.action-status-panel[data-state="cancelled"] {
+  border-color: var(--muted-subtle);
 }
 
 .compact-card {
-  padding: 10px 12px;
+  padding: 8px 10px;
 }
 
 .action-status-header {
@@ -411,9 +488,62 @@ input[type="checkbox"] {
   font-size: 0.86rem;
 }
 
+.action-status-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.action-panel-label {
+  color: var(--muted-subtle);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.action-status-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.action-status-state::before {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--muted-subtle);
+  content: "";
+}
+
+.action-status-panel[data-state="indeterminate"] .action-status-state::before,
+.action-status-panel[data-state="determinate"] .action-status-state::before {
+  background: var(--primary-button);
+}
+
+.action-status-panel[data-state="done"] .action-status-state::before {
+  background: var(--success);
+}
+
+.action-status-panel[data-state="failed"] .action-status-state::before {
+  background: var(--danger);
+}
+
 .action-progress-text {
+  max-width: 13rem;
+  overflow: hidden;
   color: var(--muted);
-  font-size: 0.92rem;
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .action-status-controls {
@@ -432,7 +562,7 @@ input[type="checkbox"] {
 }
 
 .action-progress-track {
-  height: 6px;
+  height: 4px;
   overflow: hidden;
   border-radius: 999px;
   background: var(--progress-track);
@@ -490,6 +620,16 @@ input[type="checkbox"] {
   gap: 8px;
 }
 
+.caption-export-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  background: var(--surface-soft);
+}
+
 .caption-segments-count {
   color: var(--muted);
   font-size: 0.9rem;
@@ -507,7 +647,7 @@ input[type="checkbox"] {
 .caption-save-button {
   min-height: 32px;
   padding: 6px 10px;
-  border-color: var(--border-soft);
+  border-color: transparent;
   background: var(--surface);
   color: var(--primary);
   font-size: 0.82rem;
@@ -628,6 +768,12 @@ input[type="checkbox"] {
   background: var(--surface);
 }
 
+.queued-clip-row.is-exporting {
+  border-color: var(--primary-strong);
+  background: var(--surface-selected);
+  box-shadow: inset 4px 0 0 var(--primary-button);
+}
+
 .queued-clip-metadata {
   display: flex;
   grid-column: 1 / -1;
@@ -653,6 +799,19 @@ input[type="checkbox"] {
   border-radius: 999px;
   background: var(--surface-soft);
   color: var(--primary);
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.queued-clip-exporting {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border: 1px solid var(--primary-strong);
+  border-radius: 999px;
+  background: var(--primary-button);
+  color: var(--primary-contrast);
   font-size: 0.7rem;
   font-weight: 700;
   line-height: 1.2;
@@ -1223,13 +1382,21 @@ pre {
   }
 
   .source-actions {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .source-actions button {
     min-height: 32px;
     padding: 5px 6px;
     font-size: 0.72rem;
+  }
+
+  .action-panel-label {
+    display: none;
+  }
+
+  .action-progress-text {
+    max-width: 7rem;
   }
 
   .clip-card .actions {

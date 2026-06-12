@@ -20,8 +20,8 @@ This project provides a privacy-friendly local workflow for generating captions,
 - Extract mono 16 kHz WAV audio from video with FFmpeg
 - Convert uploaded `.m4a` audio to temporary mono 16 kHz WAV before Whisper
 - Generate `.srt` and `.vtt` captions locally with the local Whisper runtime
-- Show best-effort action status for extraction, conversion, captioning, and clipping
-- Cancel active FFmpeg or Whisper work from the action status panel
+- Show compact Activity status for extraction, conversion, captioning, and clipping
+- Cancel active FFmpeg or Whisper work from the Activity panel
 - Inspect and filter FFmpeg/Whisper output in a resizable log drawer
 - Preview selected video or uploaded audio in an embedded HTML5 player
 - Parse generated captions into a scrollable Caption Segments list
@@ -115,9 +115,11 @@ Uploaded `.m4a` files are converted to temporary mono 16 kHz WAV files before tr
 - Video: `.mp4`, `.mov`, `.mkv`, `.avi`, `.webm`, `.m4v`
 - Audio: `.wav`, `.mp3`, `.m4a`, `.aac`, `.flac`, `.ogg`, `.opus`, `.wma`, `.aiff`, `.aif`
 
-Selecting a new video clears the current caption source, caption segments, and queued clips. Temporary audio and subtitle files can be inspected through **File > Reveal Temp Folder**.
+Selecting new media clears the current caption source, caption segments, clip fields, and queued clips. Temporary audio and subtitle files can be inspected through **File > Reveal Temp Folder**.
 
 The app automatically saves and restores the most recent caption project, including selected source paths, generated or edited caption segments, clip fields, and queued clips.
+
+A subtle source-panel notice confirms restored project state. If saved media files are missing, the notice explains what was restored and which source needs reselecting. Selecting new media clears stale captions, clip fields, and queued clips.
 
 ## Caption-assisted editing
 
@@ -171,6 +173,7 @@ Enter or select a start/end range in `HH:MM:SS.mmm` format, then choose an FFmpe
 - Queued clips are stored in renderer state only.
 - Each row shows start/end time, optional caption preview, and a remove button.
 - **Export All Clips** runs clips sequentially, not in parallel.
+- The currently exporting queued clip is highlighted.
 - Batch output is written beside the selected video with incremental names such as `_clip_001.mp4`, `_clip_002.mp4`, and so on.
 - Failed queued clips are logged and the remaining queue continues.
 
@@ -199,9 +202,9 @@ Theme changes apply immediately without restarting the app.
 
 Click **Show Log** to open the resizable log drawer. It can filter entries by FFmpeg, Whisper, or errors, copy the visible log, and optionally show noisy raw FFmpeg progress lines.
 
-The action status panel shows the current stage, such as extracting audio, converting audio, generating captions, or exporting clips. Progress percentage and estimated remaining time are shown only when the app has reliable tool output or duration data.
+The compact Activity panel shows the current stage, such as extracting audio, converting audio, generating captions, exporting clips, cancelled, or complete. Its progress bar appears only during active work, and percentages appear only when reliable tool progress is available.
 
-Click **Cancel** in the action status panel to stop the active FFmpeg or Whisper process. Cancelling a batch clip export stops the current clip and does not continue with the remaining queue.
+Click **Cancel** in the Activity panel to stop the active FFmpeg or Whisper process. Cancelling a batch clip export stops the current clip, leaves remaining clips unexported, and reports the completed count.
 
 ## Current limitations
 
