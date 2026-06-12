@@ -1,6 +1,7 @@
 ﻿node_modules/
 dist/
 .tmp-ts-test/
+.tmp-test/
 .runtime-staging/
 video-caption-app/bin/ffmpeg.exe
 video-caption-app/bin/ffprobe.exe

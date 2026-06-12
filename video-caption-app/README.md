@@ -21,6 +21,7 @@ This project provides a privacy-friendly local workflow for generating captions,
 - Convert uploaded `.m4a` audio to temporary mono 16 kHz WAV before Whisper
 - Generate `.srt` and `.vtt` captions locally with the local Whisper runtime
 - Show best-effort action status for extraction, conversion, captioning, and clipping
+- Cancel active FFmpeg or Whisper work from the action status panel
 - Inspect and filter FFmpeg/Whisper output in a resizable log drawer
 - Preview selected video or uploaded audio in an embedded HTML5 player
 - Parse generated captions into a scrollable Caption Segments list
@@ -31,6 +32,7 @@ This project provides a privacy-friendly local workflow for generating captions,
 - Save extracted audio and edited captions through save dialogs
 - Create one-off video clips from start/end timestamps
 - Queue multiple clip ranges and export them sequentially
+- Restore the most recent caption project after restarting the app
 - Choose Appearance theme: System, Dark, or Light
 
 ## Screenshots
@@ -115,6 +117,8 @@ Uploaded `.m4a` files are converted to temporary mono 16 kHz WAV files before tr
 
 Selecting a new video clears the current caption source, caption segments, and queued clips. Temporary audio and subtitle files can be inspected through **File > Reveal Temp Folder**.
 
+The app automatically saves and restores the most recent caption project, including selected source paths, generated or edited caption segments, clip fields, and queued clips.
+
 ## Caption-assisted editing
 
 After caption generation, the renderer parses the generated SRT text into caption segments. Each row shows start time, end time, and caption text.
@@ -197,14 +201,15 @@ Click **Show Log** to open the resizable log drawer. It can filter entries by FF
 
 The action status panel shows the current stage, such as extracting audio, converting audio, generating captions, or exporting clips. Progress percentage and estimated remaining time are shown only when the app has reliable tool output or duration data.
 
+Click **Cancel** in the action status panel to stop the active FFmpeg or Whisper process. Cancelling a batch clip export stops the current clip and does not continue with the remaining queue.
+
 ## Current limitations
 
 - Currently Windows-focused because the local runtime binaries are Windows builds.
 - The app currently uses the English `ggml-base.en.bin` Whisper model.
 - No packaged installer yet; run with `npm start`.
-- Queued clips and caption edits are not persisted after app restart.
+- Only the most recent caption project is restored. Missing media paths are omitted while saved captions and clip fields remain available.
 - Caption timestamp editing is not available yet.
-- Full project/session restore has not been added yet.
 
 ## Development
 
@@ -213,6 +218,13 @@ The action status panel shows the current stage, such as extracting audio, conve
 ```powershell
 cd video-caption-app
 npm run build
+```
+
+### Test
+
+```powershell
+cd video-caption-app
+npm test
 ```
 
 ### Start

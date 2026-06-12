@@ -4,6 +4,7 @@
 };
 
 type AudioSourceKind = "uploaded" | "extracted" | null;
+type ClipMode = "copy" | "encode";
 type ThemeMode = "system" | "dark" | "light";
 
 function mustGet<T extends HTMLElement>(id: string): T {
@@ -34,6 +35,7 @@ const actionStatusNode = mustGet<HTMLElement>("actionStatus");
 const actionProgressTrackNode = mustGet<HTMLElement>("actionProgressTrack");
 const actionProgressBarNode = mustGet<HTMLElement>("actionProgressBar");
 const actionProgressTextNode = mustGet<HTMLElement>("actionProgressText");
+const cancelActionButton = mustGet<HTMLButtonElement>("cancelActionButton");
 
 const selectedVideoPathNode = mustGet<HTMLElement>("selectedVideoPath");
 const audioPathNode = mustGet<HTMLElement>("audioPath");
@@ -65,6 +67,7 @@ let srtPath: string | null = null;
 let vttPath: string | null = null;
 let audioSourceKind: AudioSourceKind = null;
 let isBusy = false;
+let isCancelling = false;
 let currentThemeMode: ThemeMode = "system";
 let logDrawerWidth = 460;
 
@@ -78,7 +81,7 @@ type ToolName = "ffmpeg" | "whisper";
 type StreamName = "stdout" | "stderr";
 type LogFilter = "all" | "ffmpeg" | "whisper" | "errors";
 type ActiveActionKind = "extract" | "caption" | "clip";
-type ActionStatusMode = "idle" | "indeterminate" | "determinate" | "done" | "failed";
+type ActionStatusMode = "idle" | "indeterminate" | "determinate" | "done" | "failed" | "cancelled";
 
 interface StoredLogEntry {
   tool?: ToolName;
@@ -108,12 +111,32 @@ interface QueuedClip {
   videoPath: string;
   startTime: string;
   endTime: string;
-  mode: "copy" | "encode";
+  mode: ClipMode;
   preview: string;
+}
+
+interface CaptionProjectSession {
+  version: 1;
+  selectedVideoPath: string | null;
+  audioPath: string | null;
+  audioSourceKind: AudioSourceKind;
+  srtPath: string | null;
+  vttPath: string | null;
+  captionSegments: CaptionSegment[];
+  queuedClips: QueuedClip[];
+  clipStart: string;
+  clipEnd: string;
+  clipMode: ClipMode;
 }
 
 const logEntries: StoredLogEntry[] = [];
 const maxLogEntries = 5000;
+const MEDIA_PROCESS_CANCELLED_MESSAGE = "Media process cancelled";
+const timestampToSeconds = window.timestampUtils.parseTimestampSeconds;
+const normalizeSubtitleTimestamp = window.timestampUtils.normalizeCaptionTime;
+const parseSrtDocument = window.subtitleUtils.parseSrtSegments;
+const createSrtText = window.subtitleUtils.regenerateSrtFromSegments;
+const createVttText = window.subtitleUtils.regenerateVttFromSegments;
 let logRenderScheduled = false;
 let captionSegments: CaptionSegment[] = [];
 let queuedClips: QueuedClip[] = [];
@@ -128,6 +151,8 @@ let activePlaybackSegmentIndex: number | null = null;
 let editingCaptionIndex: number | null = null;
 let currentPreviewKind: "video" | "audio" | null = null;
 let currentPreviewUrl: string | null = null;
+let captionProjectPersistenceReady = false;
+let captionProjectSaveTimer: number | null = null;
 
 function isSupportedVideoPath(filePath: string): boolean {
   const extensionMatch = filePath.toLowerCase().match(/\.([^.\\/]+)$/);
@@ -160,14 +185,17 @@ function syncButtons(): void {
   extractAudioButton.disabled = isBusy || !selectedVideoPath;
   generateCaptionsButton.disabled = isBusy || !audioPath;
   saveAudioButton.disabled = isBusy || !audioPath || audioSourceKind !== "extracted";
-  saveSrtButton.disabled = isBusy || !srtPath;
-  saveVttButton.disabled = isBusy || !vttPath;
+  saveSrtButton.disabled = isBusy || (!srtPath && captionSegments.length === 0);
+  saveVttButton.disabled = isBusy || (!vttPath && captionSegments.length === 0);
   selectVideoButton.disabled = isBusy;
   selectAudioButton.disabled = isBusy;
 
   clipCreateButton.disabled = isBusy || !selectedVideoPath;
   clipAddRangeButton.disabled = isBusy || !selectedVideoPath;
   queuedClipsExportButton.disabled = isBusy || queuedClips.length === 0;
+  cancelActionButton.hidden = !isBusy || activeAction === null;
+  cancelActionButton.disabled = !isBusy || activeAction === null || isCancelling;
+  cancelActionButton.textContent = isCancelling ? "Cancelling..." : "Cancel";
 }
 
 const systemThemeMedia = window.matchMedia("(prefers-color-scheme: dark)");
@@ -381,31 +409,9 @@ function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function parseTimestampSeconds(value: string): number | null {
-  const match = value
-    .trim()
-    .replace(",", ".")
-    .match(/^(\d+):(\d{2}):(\d{2})(?:\.(\d+))?$/);
-
-  if (!match) {
-    return null;
-  }
-
-  const hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  const seconds = Number(match[3]);
-  const fraction = match[4] ? Number(`0.${match[4]}`) : 0;
-
-  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || !Number.isFinite(seconds) || !Number.isFinite(fraction)) {
-    return null;
-  }
-
-  return hours * 3600 + minutes * 60 + seconds + fraction;
-}
-
 function getClipDurationSeconds(startTime: string, endTime: string): number | null {
-  const startSeconds = parseTimestampSeconds(startTime);
-  const endSeconds = parseTimestampSeconds(endTime);
+  const startSeconds = timestampToSeconds(startTime);
+  const endSeconds = timestampToSeconds(endTime);
 
   if (startSeconds === null || endSeconds === null || endSeconds <= startSeconds) {
     return null;
@@ -431,12 +437,12 @@ function formatRemainingTime(secondsInput: number): string {
 
 function parseFfmpegDurationSeconds(message: string): number | null {
   const match = message.match(/Duration:\s*(\d+:\d{2}:\d{2}(?:[,.]\d+)?)/i);
-  return match ? parseTimestampSeconds(match[1]) : null;
+  return match ? timestampToSeconds(match[1]) : null;
 }
 
 function parseFfmpegProgressSeconds(message: string): number | null {
   const match = message.match(/\btime=\s*(\d+:\d{2}:\d{2}(?:[,.]\d+)?)/i);
-  return match ? parseTimestampSeconds(match[1]) : null;
+  return match ? timestampToSeconds(match[1]) : null;
 }
 
 function parseWhisperPercent(message: string): number | null {
@@ -471,8 +477,8 @@ function parseWhisperCaptionLine(line: string): CaptionSegment | null {
   const text = match[3].trim();
   return {
     index: captionSegments.length + 1,
-    start: normalizeCaptionTime(match[1]),
-    end: normalizeCaptionTime(match[2]),
+    start: normalizeSubtitleTimestamp(match[1]),
+    end: normalizeSubtitleTimestamp(match[2]),
     text: text || "(no text)"
   };
 }
@@ -484,9 +490,10 @@ function setActionStatus(label: string, text: string, mode: ActionStatusMode, pe
   actionProgressBarNode.classList.toggle("is-indeterminate", mode === "indeterminate");
   actionProgressBarNode.classList.toggle("is-complete", mode === "done");
   actionProgressBarNode.classList.toggle("is-failed", mode === "failed");
+  actionProgressBarNode.classList.toggle("is-cancelled", mode === "cancelled");
   actionProgressBarNode.style.width = mode === "indeterminate" ? "34%" : `${clampedPercent}%`;
 
-  if (mode === "determinate" || mode === "done" || mode === "failed") {
+  if (mode === "determinate" || mode === "done" || mode === "failed" || mode === "cancelled") {
     actionProgressTrackNode.setAttribute("aria-valuenow", String(Math.round(clampedPercent)));
   } else {
     actionProgressTrackNode.removeAttribute("aria-valuenow");
@@ -497,7 +504,9 @@ function setActionStatus(label: string, text: string, mode: ActionStatusMode, pe
 
 function setIdleActionStatus(): void {
   activeAction = null;
+  isCancelling = false;
   setActionStatus("Idle", "Idle", "idle", 0);
+  syncButtons();
 }
 
 function startActionStatus(kind: ActiveActionKind, label: string, totalDurationSeconds: number | null = null): void {
@@ -512,6 +521,8 @@ function startActionStatus(kind: ActiveActionKind, label: string, totalDurationS
     startedAtMs: Date.now(),
     totalDurationSeconds
   };
+  isCancelling = false;
+  syncButtons();
 
   if (totalDurationSeconds !== null) {
     setActionStatus(label, "0%", "determinate", 0);
@@ -611,7 +622,7 @@ function updateCaptionProgressFromTimestamp(endTime: string): void {
     return;
   }
 
-  const endSeconds = parseTimestampSeconds(endTime);
+  const endSeconds = timestampToSeconds(endTime);
   if (endSeconds === null || activeAction.totalDurationSeconds === null || activeAction.totalDurationSeconds <= 0) {
     setActionStatus(activeAction.label, getCaptionStatusText(), "indeterminate", 0);
     return;
@@ -643,8 +654,8 @@ function findCaptionSegment(index: number | null): CaptionSegment | null {
 function setActivePlaybackSegmentForSeconds(seconds: number): void {
   const segment =
     captionSegments.find((candidate) => {
-      const startSeconds = parseTimestampSeconds(candidate.start);
-      const endSeconds = parseTimestampSeconds(candidate.end);
+      const startSeconds = timestampToSeconds(candidate.start);
+      const endSeconds = timestampToSeconds(candidate.end);
       return startSeconds !== null && endSeconds !== null && seconds >= startSeconds && seconds < endSeconds;
     }) ?? null;
   const nextIndex = segment?.index ?? null;
@@ -658,7 +669,7 @@ function setActivePlaybackSegmentForSeconds(seconds: number): void {
 }
 
 function seekMediaToTimestamp(timestamp: string): void {
-  const seconds = parseTimestampSeconds(timestamp);
+  const seconds = timestampToSeconds(timestamp);
   const mediaElement = getActivePreviewElement();
 
   if (seconds === null || !mediaElement) {
@@ -733,6 +744,7 @@ function selectCaptionSegment(segment: CaptionSegment): void {
     clipEndInput.value = segment.end;
     renderCaptionSegments();
     appendLog("Clip range start set from caption segment.");
+    scheduleCaptionProjectSave();
     return;
   }
 
@@ -745,6 +757,7 @@ function selectCaptionSegment(segment: CaptionSegment): void {
     clipEndInput.value = segment.end;
     renderCaptionSegments();
     appendLog("Clip range start set from caption segment.");
+    scheduleCaptionProjectSave();
     return;
   }
 
@@ -753,6 +766,7 @@ function selectCaptionSegment(segment: CaptionSegment): void {
     clipEndInput.value = segment.end;
     renderCaptionSegments();
     appendLog("Clip range start set from caption segment.");
+    scheduleCaptionProjectSave();
     return;
   }
 
@@ -769,6 +783,7 @@ function selectCaptionSegment(segment: CaptionSegment): void {
 
   renderCaptionSegments();
   appendLog("Clip range set from caption segments.");
+  scheduleCaptionProjectSave();
 }
 
 function startCaptionEdit(segment: CaptionSegment): void {
@@ -802,6 +817,7 @@ function saveCaptionEdit(index: number, text: string): void {
 
   editingCaptionIndex = null;
   renderCaptionSegments();
+  scheduleCaptionProjectSave();
 }
 
 function handleLiveWhisperCaptionLine(line: string): void {
@@ -821,6 +837,7 @@ function handleLiveWhisperCaptionLine(line: string): void {
   const shouldScroll = shouldAutoScrollCaptionSegments();
   captionSegments.push(segment);
   renderCaptionSegments();
+  scheduleCaptionProjectSave();
 
   if (shouldScroll) {
     scrollCaptionSegmentsToBottom();
@@ -873,12 +890,27 @@ function updateActionProgressFromToolLog(entry: { tool: ToolName; stream?: Strea
 
 function completeActionStatus(): void {
   activeAction = null;
+  isCancelling = false;
   setActionStatus("Done", "Done", "done", 100);
+  syncButtons();
 }
 
 function failActionStatus(message: string): void {
   activeAction = null;
+  isCancelling = false;
   setActionStatus(`Failed: ${message}`, "Failed", "failed", 100);
+  syncButtons();
+}
+
+function cancelActionStatus(): void {
+  activeAction = null;
+  isCancelling = false;
+  setActionStatus("Cancelled", "Cancelled", "cancelled", 100);
+  syncButtons();
+}
+
+function isMediaProcessCancellation(message: string): boolean {
+  return message.includes(MEDIA_PROCESS_CANCELLED_MESSAGE);
 }
 
 function getMaxLogDrawerWidth(): number {
@@ -920,44 +952,6 @@ function toggleLogDrawer(): void {
   openLogDrawer();
 }
 
-function normalizeCaptionTime(value: string): string {
-  return value.replace(",", ".");
-}
-
-function formatSrtTimestamp(timestamp: string): string {
-  return timestamp.replace(".", ",");
-}
-
-function formatVttTimestamp(timestamp: string): string {
-  return timestamp.replace(",", ".");
-}
-
-function regenerateSrtFromSegments(): string {
-  if (captionSegments.length === 0) {
-    return "";
-  }
-
-  return `${captionSegments
-    .map((segment, index) => {
-      const text = segment.text.trim() || "(no text)";
-      return `${index + 1}\n${formatSrtTimestamp(segment.start)} --> ${formatSrtTimestamp(segment.end)}\n${text}`;
-    })
-    .join("\n\n")}\n`;
-}
-
-function regenerateVttFromSegments(): string {
-  if (captionSegments.length === 0) {
-    return "WEBVTT\n";
-  }
-
-  return `WEBVTT\n\n${captionSegments
-    .map((segment) => {
-      const text = segment.text.trim() || "(no text)";
-      return `${formatVttTimestamp(segment.start)} --> ${formatVttTimestamp(segment.end)}\n${text}`;
-    })
-    .join("\n\n")}\n`;
-}
-
 function getCaptionPreview(text: string): string {
   return text.length <= 120 ? text : `${text.slice(0, 117).trimEnd()}...`;
 }
@@ -995,16 +989,16 @@ function getShortCaptionPreview(text: string): string {
 }
 
 function getQueuedClipPreview(startTime: string, endTime: string): string {
-  const startSeconds = parseTimestampSeconds(startTime);
-  const endSeconds = parseTimestampSeconds(endTime);
+  const startSeconds = timestampToSeconds(startTime);
+  const endSeconds = timestampToSeconds(endTime);
 
   if (startSeconds === null || endSeconds === null) {
     return "";
   }
 
   const selectedSegments = captionSegments.filter((segment) => {
-    const segmentStart = parseTimestampSeconds(segment.start);
-    const segmentEnd = parseTimestampSeconds(segment.end);
+    const segmentStart = timestampToSeconds(segment.start);
+    const segmentEnd = timestampToSeconds(segment.end);
     return segmentStart !== null && segmentEnd !== null && segmentEnd > startSeconds && segmentStart < endSeconds;
   });
 
@@ -1017,46 +1011,6 @@ function getQueuedClipPreview(startTime: string, endTime: string): string {
   }
 
   return `${getShortCaptionPreview(selectedSegments[0].text)} / ${getShortCaptionPreview(selectedSegments[selectedSegments.length - 1].text)}`;
-}
-
-function parseSrtSegments(srtText: string): CaptionSegment[] {
-  const normalizedText = srtText.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
-  if (normalizedText === "") {
-    return [];
-  }
-
-  const segments: CaptionSegment[] = [];
-  const blocks = normalizedText.split(/\n{2,}/);
-
-  for (const block of blocks) {
-    const lines = block
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
-    const timingLineIndex = lines.findIndex((line) => line.includes("-->"));
-
-    if (timingLineIndex < 0) {
-      continue;
-    }
-
-    const timingMatch = lines[timingLineIndex].match(
-      /(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,.]\d{3})/
-    );
-
-    if (!timingMatch) {
-      continue;
-    }
-
-    const text = lines.slice(timingLineIndex + 1).join(" ").trim();
-    segments.push({
-      index: segments.length + 1,
-      start: normalizeCaptionTime(timingMatch[1]),
-      end: normalizeCaptionTime(timingMatch[2]),
-      text: text || "(no text)"
-    });
-  }
-
-  return segments;
 }
 
 function renderCaptionSegments(): void {
@@ -1233,6 +1187,8 @@ function setCaptionSegments(segments: CaptionSegment[]): void {
   if (shouldScroll) {
     scrollCaptionSegmentsToBottom();
   }
+
+  scheduleCaptionProjectSave();
 }
 
 function renderQueuedClips(): void {
@@ -1269,6 +1225,7 @@ function renderQueuedClips(): void {
     removeButton.addEventListener("click", () => {
       queuedClips = queuedClips.filter((candidate) => candidate.id !== clip.id);
       renderQueuedClips();
+      scheduleCaptionProjectSave();
     });
 
     row.append(timeNode, previewNode, removeButton);
@@ -1281,6 +1238,7 @@ function renderQueuedClips(): void {
 function clearQueuedClips(): void {
   queuedClips = [];
   renderQueuedClips();
+  scheduleCaptionProjectSave();
 }
 
 function renderLogPanel(): void {
@@ -1360,6 +1318,105 @@ function appendLog(message: string): void {
   addLogEntries(message);
 }
 
+function getCaptionProjectSnapshot(): CaptionProjectSession {
+  return {
+    version: 1,
+    selectedVideoPath,
+    audioPath,
+    audioSourceKind,
+    srtPath,
+    vttPath,
+    captionSegments: captionSegments.map((segment) => ({ ...segment })),
+    queuedClips: queuedClips.map((clip) => ({ ...clip })),
+    clipStart: clipStartInput.value.trim(),
+    clipEnd: clipEndInput.value.trim(),
+    clipMode: clipModeSelect.value === "encode" ? "encode" : "copy"
+  };
+}
+
+function scheduleCaptionProjectSave(): void {
+  if (!captionProjectPersistenceReady) {
+    return;
+  }
+
+  if (captionProjectSaveTimer !== null) {
+    window.clearTimeout(captionProjectSaveTimer);
+  }
+
+  captionProjectSaveTimer = window.setTimeout(() => {
+    captionProjectSaveTimer = null;
+    void window.videoTools.setCaptionProject(getCaptionProjectSnapshot()).catch((error) => {
+      appendLog(`Save caption project failed: ${(error as Error).message}`);
+    });
+  }, 250);
+}
+
+async function restoreCaptionProject(): Promise<void> {
+  let restoredProjectChanged = false;
+
+  try {
+    const session = await window.videoTools.getCaptionProject();
+    if (!session || session.version !== 1) {
+      return;
+    }
+
+    const restoreExistingPath = async (savedPath: string | null): Promise<string | null> => {
+      if (!savedPath) {
+        return null;
+      }
+
+      if (await window.videoTools.pathExists(savedPath)) {
+        return savedPath;
+      }
+
+      restoredProjectChanged = true;
+      return null;
+    };
+
+    selectedVideoPath = await restoreExistingPath(session.selectedVideoPath);
+    audioPath = await restoreExistingPath(session.audioPath);
+    audioSourceKind = audioPath ? session.audioSourceKind : null;
+    srtPath = await restoreExistingPath(session.srtPath);
+    vttPath = await restoreExistingPath(session.vttPath);
+
+    const savedQueuedClips = Array.isArray(session.queuedClips) ? session.queuedClips : [];
+    const restoredQueuedClips = await Promise.all(
+      savedQueuedClips.map(async (clip): Promise<QueuedClip | null> => {
+        if (await window.videoTools.pathExists(clip.videoPath)) {
+          return { ...clip };
+        }
+
+        restoredProjectChanged = true;
+        return null;
+      })
+    );
+    queuedClips = restoredQueuedClips.filter((clip): clip is QueuedClip => clip !== null);
+    nextQueuedClipId = queuedClips.reduce((maximum, clip) => Math.max(maximum, clip.id), 0) + 1;
+    clipStartInput.value = session.clipStart ?? "";
+    clipEndInput.value = session.clipEnd ?? "";
+    clipModeSelect.value = session.clipMode === "encode" ? "encode" : "copy";
+
+    setCaptionSegments(
+      Array.isArray(session.captionSegments) ? session.captionSegments.map((segment) => ({ ...segment })) : []
+    );
+    refreshPaths();
+    renderQueuedClips();
+    syncButtons();
+    appendLog(
+      restoredProjectChanged
+        ? "Restored previous caption project; missing media paths were omitted."
+        : "Restored previous caption project."
+    );
+  } catch (error) {
+    appendLog(`Restore caption project failed: ${(error as Error).message}`);
+  } finally {
+    captionProjectPersistenceReady = true;
+    if (restoredProjectChanged) {
+      scheduleCaptionProjectSave();
+    }
+  }
+}
+
 function renderSettings(settings: AppSettings): void {
   applyThemeMode(settings.themeMode);
 }
@@ -1424,6 +1481,7 @@ function applySelectedVideo(videoPath: string): void {
   refreshPaths();
   syncButtons();
   appendLog(`Selected video: ${selectedVideoPath}`);
+  scheduleCaptionProjectSave();
 }
 
 function applySelectedAudio(nextAudioPath: string): void {
@@ -1436,6 +1494,7 @@ function applySelectedAudio(nextAudioPath: string): void {
   refreshPaths();
   syncButtons();
   appendLog(`Selected audio: ${audioPath}`);
+  scheduleCaptionProjectSave();
 }
 
 try {
@@ -1502,6 +1561,12 @@ window.addEventListener("unhandledrejection", (event) => {
   addLogEntries(`Unhandled rejection: ${reasonText}`, { isError: true });
 });
 
+window.addEventListener("beforeunload", () => {
+  if (captionProjectPersistenceReady) {
+    void window.videoTools.setCaptionProject(getCaptionProjectSnapshot()).catch(() => undefined);
+  }
+});
+
 showRawLogsCheckbox.addEventListener("change", () => {
   scheduleLogPanelRender();
 });
@@ -1514,6 +1579,30 @@ systemThemeMedia.addEventListener("change", () => {
 
 logFilterSelect.addEventListener("change", () => {
   scheduleLogPanelRender();
+});
+
+cancelActionButton.addEventListener("click", async () => {
+  if (!activeAction || isCancelling) {
+    return;
+  }
+
+  isCancelling = true;
+  syncButtons();
+  setActionStatus(activeAction.label, "Cancelling...", "indeterminate", 0);
+  appendLog("Cancellation requested.");
+
+  try {
+    const cancelled = await window.videoTools.cancelActiveMediaProcess();
+    if (!cancelled) {
+      appendLog("Cancellation skipped: no active media process.");
+      isCancelling = false;
+      syncButtons();
+    }
+  } catch (error) {
+    appendLog(`Cancellation request failed: ${(error as Error).message}`);
+    isCancelling = false;
+    syncButtons();
+  }
 });
 
 showLogButton.addEventListener("click", () => {
@@ -1567,6 +1656,10 @@ captionClearSelectionButton.addEventListener("click", () => {
 captionSearchInput.addEventListener("input", () => {
   renderCaptionSegments();
 });
+
+clipStartInput.addEventListener("input", scheduleCaptionProjectSave);
+clipEndInput.addEventListener("input", scheduleCaptionProjectSave);
+clipModeSelect.addEventListener("change", scheduleCaptionProjectSave);
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") {
@@ -1667,6 +1760,7 @@ clipAddRangeButton.addEventListener("click", () => {
 
   renderQueuedClips();
   appendLog(`Queued clip range: ${startTime} - ${endTime}`);
+  scheduleCaptionProjectSave();
 });
 
 selectVideoButton.addEventListener("click", async () => {
@@ -1705,17 +1799,6 @@ selectAudioButton.addEventListener("click", async () => {
   } finally {
     setBusy(false);
   }
-});
-
-window.addEventListener("menu:open-video", (event: Event) => {
-  const customEvent = event as CustomEvent<string>;
-  const videoPath = customEvent.detail;
-
-  if (typeof videoPath !== "string" || videoPath.trim() === "") {
-    return;
-  }
-
-  applySelectedVideo(videoPath);
 });
 
 window.addEventListener("dragover", (event) => {
@@ -1817,8 +1900,13 @@ clipCreateButton.addEventListener("click", async () => {
     completeActionStatus();
   } catch (error) {
     const message = (error as Error).message;
-    appendLog(`Create clip failed: ${message}`);
-    failActionStatus(message);
+    if (isMediaProcessCancellation(message)) {
+      appendLog("Create clip cancelled.");
+      cancelActionStatus();
+    } else {
+      appendLog(`Create clip failed: ${message}`);
+      failActionStatus(message);
+    }
   } finally {
     setBusy(false);
   }
@@ -1833,6 +1921,7 @@ queuedClipsExportButton.addEventListener("click", async () => {
   const totalClips = clipsToExport.length;
   let exportedCount = 0;
   let failedCount = 0;
+  let cancelled = false;
 
   setBusy(true);
   renderQueuedClips();
@@ -1868,13 +1957,24 @@ queuedClipsExportButton.addEventListener("click", async () => {
         exportedCount += 1;
         appendLog(`Queued clip ${clipNumber} exported: ${result.outputPath}`);
       } catch (error) {
+        const message = (error as Error).message;
+        if (isMediaProcessCancellation(message)) {
+          cancelled = true;
+          appendLog(`Queued clip export cancelled during clip ${clipNumber}.`);
+          break;
+        }
+
         failedCount += 1;
-        appendLog(`Export queued clip ${clipNumber} failed: ${(error as Error).message}`);
+        appendLog(`Export queued clip ${clipNumber} failed: ${message}`);
       }
     }
 
-    activeAction = null;
-    setActionStatus("Done", `Done (${exportedCount} exported, ${failedCount} failed)`, "done", 100);
+    if (cancelled) {
+      cancelActionStatus();
+    } else {
+      activeAction = null;
+      setActionStatus("Done", `Done (${exportedCount} exported, ${failedCount} failed)`, "done", 100);
+    }
   } finally {
     setBusy(false);
     renderQueuedClips();
@@ -1901,14 +2001,20 @@ extractAudioButton.addEventListener("click", async () => {
     refreshPaths();
     syncButtons();
     appendLog(`Audio extracted: ${audioPath}`);
+    scheduleCaptionProjectSave();
     completeActionStatus();
     appendLog("Choose where to save the extracted audio.");
     await promptSaveExtractedAudio();
   } catch (error) {
     const message = (error as Error).message;
-    appendLog(`Audio extraction failed: ${message}`);
-    appendSetupHintForMissingDependency(message);
-    failActionStatus(message);
+    if (isMediaProcessCancellation(message)) {
+      appendLog("Audio extraction cancelled.");
+      cancelActionStatus();
+    } else {
+      appendLog(`Audio extraction failed: ${message}`);
+      appendSetupHintForMissingDependency(message);
+      failActionStatus(message);
+    }
   } finally {
     setBusy(false);
   }
@@ -1941,25 +2047,32 @@ generateCaptionsButton.addEventListener("click", async () => {
     });
     srtPath = result.srtPath;
     vttPath = result.vttPath;
-    setCaptionSegments(parseSrtSegments(result.srtText));
+    setCaptionSegments(parseSrtDocument(result.srtText));
 
     refreshPaths();
     syncButtons();
     appendLog(`Captions generated: ${srtPath}, ${vttPath}`);
     appendLog("Use Save SRT or Save VTT to choose where to keep the generated captions.");
+    scheduleCaptionProjectSave();
     completeActionStatus();
   } catch (error) {
     const message = (error as Error).message;
-    appendLog(`Caption generation failed: ${message}`);
-    appendSetupHintForMissingDependency(message);
-    failActionStatus(message);
+    if (isMediaProcessCancellation(message)) {
+      appendLog("Caption generation cancelled.");
+      cancelActionStatus();
+      scheduleCaptionProjectSave();
+    } else {
+      appendLog(`Caption generation failed: ${message}`);
+      appendSetupHintForMissingDependency(message);
+      failActionStatus(message);
+    }
   } finally {
     setBusy(false);
   }
 });
 
 saveSrtButton.addEventListener("click", async () => {
-  if (!srtPath) {
+  if (!srtPath && captionSegments.length === 0) {
     return;
   }
 
@@ -1969,13 +2082,13 @@ saveSrtButton.addEventListener("click", async () => {
     const savedPath =
       captionSegments.length > 0
         ? await window.videoTools.saveTextAs({
-            content: regenerateSrtFromSegments(),
+            content: createSrtText(captionSegments),
             defaultFileName: "captions.srt",
             mediaPath: getCaptionContextPath(),
             extension: "srt"
           })
         : await window.videoTools.saveFileAs({
-            sourcePath: srtPath,
+            sourcePath: srtPath!,
             defaultFileName: "captions.srt",
             mediaPath: getCaptionContextPath()
           });
@@ -1989,7 +2102,7 @@ saveSrtButton.addEventListener("click", async () => {
 });
 
 saveVttButton.addEventListener("click", async () => {
-  if (!vttPath) {
+  if (!vttPath && captionSegments.length === 0) {
     return;
   }
 
@@ -1999,13 +2112,13 @@ saveVttButton.addEventListener("click", async () => {
     const savedPath =
       captionSegments.length > 0
         ? await window.videoTools.saveTextAs({
-            content: regenerateVttFromSegments(),
+            content: createVttText(captionSegments),
             defaultFileName: "captions.vtt",
             mediaPath: getCaptionContextPath(),
             extension: "vtt"
           })
         : await window.videoTools.saveFileAs({
-            sourcePath: vttPath,
+            sourcePath: vttPath!,
             defaultFileName: "captions.vtt",
             mediaPath: getCaptionContextPath()
           });
@@ -2034,7 +2147,7 @@ renderCaptionSegments();
 renderQueuedClips();
 syncButtons();
 appendLog("Ready.");
-void initSettings();
+void Promise.all([initSettings(), restoreCaptionProject()]);
 
 
 

@@ -7,12 +7,13 @@
   SaveDialogOptions,
   SaveDialogReturnValue
 } from "electron";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import Store from "electron-store";
 import type {
   AppSettings,
+  CaptionProjectSession,
   ClipVideoRequest,
   ExtractAudioResult,
   PersistedSettings,
@@ -42,12 +43,20 @@ type ToolName = ToolLogEntry["tool"];
 type StreamName = ToolLogEntry["stream"];
 
 const APP_USER_MODEL_ID = "com.local.video-caption-app";
+const MEDIA_PROCESS_CANCELLED_MESSAGE = "Media process cancelled";
 
-const settingsStore = new Store<PersistedSettings>({
+const settingsStore = new Store<PersistedSettings & { captionProject?: CaptionProjectSession }>({
   defaults: {
     themeMode: "system"
   }
 });
+
+interface ActiveMediaRun {
+  child: ChildProcessWithoutNullStreams | null;
+  cancelled: boolean;
+}
+
+const activeMediaRuns = new Map<number, ActiveMediaRun>();
 
 function resolveBinaryPath(binaryName: BinaryName): string {
   const baseDir = app.isPackaged ? process.resourcesPath : app.getAppPath();
@@ -125,6 +134,14 @@ function updatePersistedSettings(partial: Partial<PersistedSettings>): Persisted
   return getPersistedSettings();
 }
 
+function getCaptionProjectSession(): CaptionProjectSession | null {
+  return settingsStore.get("captionProject") ?? null;
+}
+
+function setCaptionProjectSession(session: CaptionProjectSession): void {
+  settingsStore.set("captionProject", session);
+}
+
 function sendSettingsToWindows(settings = getAppSettings()): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
@@ -175,6 +192,10 @@ function normalizeRunWhisperRequest(input: unknown): RunWhisperRequest {
 }
 
 function emitToolLog(event: IpcMainInvokeEvent, tool: ToolName, stream: StreamName, message: string): void {
+  if (event.sender.isDestroyed()) {
+    return;
+  }
+
   event.sender.send("tools:log", {
     tool,
     stream,
@@ -365,13 +386,68 @@ function createApplicationMenu(): void {
   Menu.setApplicationMenu(menu);
 }
 
+function throwIfMediaRunCancelled(run: ActiveMediaRun): void {
+  if (run.cancelled) {
+    throw new Error(MEDIA_PROCESS_CANCELLED_MESSAGE);
+  }
+}
+
+async function withMediaRun<T>(
+  event: IpcMainInvokeEvent,
+  operation: (run: ActiveMediaRun) => Promise<T>
+): Promise<T> {
+  const senderId = event.sender.id;
+  if (activeMediaRuns.has(senderId)) {
+    throw new Error("A media process is already active");
+  }
+
+  const run: ActiveMediaRun = {
+    child: null,
+    cancelled: false
+  };
+  activeMediaRuns.set(senderId, run);
+  const cancelWhenSenderCloses = () => {
+    cancelActiveMediaRun(senderId);
+  };
+  event.sender.once("destroyed", cancelWhenSenderCloses);
+
+  try {
+    return await operation(run);
+  } finally {
+    if (!event.sender.isDestroyed()) {
+      event.sender.removeListener("destroyed", cancelWhenSenderCloses);
+    }
+
+    if (activeMediaRuns.get(senderId) === run) {
+      activeMediaRuns.delete(senderId);
+    }
+  }
+}
+
+function cancelActiveMediaRun(senderId: number): boolean {
+  const run = activeMediaRuns.get(senderId);
+  if (!run) {
+    return false;
+  }
+
+  run.cancelled = true;
+  if (run.child && !run.child.killed) {
+    run.child.kill();
+  }
+
+  return true;
+}
+
 function runTool(
   event: IpcMainInvokeEvent,
+  run: ActiveMediaRun,
   tool: ToolName,
   binaryPath: string,
   args: string[],
   cwd?: string
 ): Promise<void> {
+  throwIfMediaRunCancelled(run);
+
   if (!existsSync(binaryPath)) {
     throw new Error(`Binary not found: ${binaryPath}`);
   }
@@ -382,6 +458,25 @@ function runTool(
       windowsHide: true,
       shell: false
     });
+    run.child = child;
+    let settled = false;
+
+    const finish = (error?: Error) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      if (run.child === child) {
+        run.child = null;
+      }
+
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    };
 
     child.stdout.on("data", (chunk) => {
       emitToolLog(event, tool, "stdout", chunk.toString());
@@ -392,21 +487,26 @@ function runTool(
     });
 
     child.on("error", (error) => {
-      reject(error);
+      finish(run.cancelled ? new Error(MEDIA_PROCESS_CANCELLED_MESSAGE) : error);
     });
 
     child.on("close", (code) => {
-      if (code === 0) {
-        resolve();
+      if (run.cancelled) {
+        finish(new Error(MEDIA_PROCESS_CANCELLED_MESSAGE));
         return;
       }
 
-      reject(new Error(`${tool} exited with code ${code ?? "null"}`));
+      if (code === 0) {
+        finish();
+        return;
+      }
+
+      finish(new Error(`${tool} exited with code ${code ?? "null"}`));
     });
   });
 }
 
-async function resolveWhisperAudioPath(event: IpcMainInvokeEvent, audioPath: string): Promise<string> {
+async function resolveWhisperAudioPath(event: IpcMainInvokeEvent, run: ActiveMediaRun, audioPath: string): Promise<string> {
   if (path.extname(audioPath).toLowerCase() !== ".m4a") {
     return audioPath;
   }
@@ -427,7 +527,8 @@ async function resolveWhisperAudioPath(event: IpcMainInvokeEvent, audioPath: str
     convertedAudioPath
   ];
 
-  await runTool(event, "ffmpeg", resolveBinaryPath("ffmpeg.exe"), args, path.dirname(audioPath));
+  await runTool(event, run, "ffmpeg", resolveBinaryPath("ffmpeg.exe"), args, path.dirname(audioPath));
+  throwIfMediaRunCancelled(run);
 
   return convertedAudioPath;
 }
@@ -467,6 +568,18 @@ app.whenReady().then(() => {
     return settings;
   });
 
+  ipcMain.handle("caption-project:get", async (): Promise<CaptionProjectSession | null> => {
+    return getCaptionProjectSession();
+  });
+
+  ipcMain.handle("caption-project:set", async (_event, session: CaptionProjectSession): Promise<void> => {
+    setCaptionProjectSession(session);
+  });
+
+  ipcMain.handle("media-process:cancel", async (event): Promise<boolean> => {
+    return cancelActiveMediaRun(event.sender.id);
+  });
+
   ipcMain.handle("open-path", async (_event, targetPath: unknown): Promise<boolean> => {
     if (typeof targetPath !== "string" || targetPath.trim() === "") {
       throw new Error("open-path requires a non-empty path string");
@@ -474,6 +587,10 @@ app.whenReady().then(() => {
 
     const result = await shell.openPath(path.resolve(targetPath));
     return result === "";
+  });
+
+  ipcMain.handle("path-exists", async (_event, targetPath: unknown): Promise<boolean> => {
+    return typeof targetPath === "string" && targetPath.trim() !== "" && existsSync(path.resolve(targetPath));
   });
 
   ipcMain.handle("open-temp-folder", async (): Promise<boolean> => {
@@ -490,118 +607,128 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle("extract-audio", async (event, videoPath: unknown): Promise<ExtractAudioResult> => {
-    const resolvedVideoPath = normalizeExistingFile(videoPath, "videoPath");
-    const tempDir = resolveTempDir();
-    const audioPath = getUniqueFilePath(tempDir, `${getSafeBaseName(resolvedVideoPath)}_audio`, ".wav");
+    return withMediaRun(event, async (run) => {
+      const resolvedVideoPath = normalizeExistingFile(videoPath, "videoPath");
+      const tempDir = resolveTempDir();
+      const audioPath = getUniqueFilePath(tempDir, `${getSafeBaseName(resolvedVideoPath)}_audio`, ".wav");
 
-    const args = [
-      "-y",
-      "-i",
-      resolvedVideoPath,
-      "-vn",
-      "-ac",
-      "1",
-      "-ar",
-      "16000",
-      "-c:a",
-      "pcm_s16le",
-      audioPath
-    ];
+      const args = [
+        "-y",
+        "-i",
+        resolvedVideoPath,
+        "-vn",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-c:a",
+        "pcm_s16le",
+        audioPath
+      ];
 
-    await runTool(event, "ffmpeg", resolveBinaryPath("ffmpeg.exe"), args, path.dirname(resolvedVideoPath));
+      await runTool(event, run, "ffmpeg", resolveBinaryPath("ffmpeg.exe"), args, path.dirname(resolvedVideoPath));
+      throwIfMediaRunCancelled(run);
 
-    return { audioPath };
+      return { audioPath };
+    });
   });
 
   console.log("[main] clip-video handler registered");
   ipcMain.handle("clip-video", async (event, request: ClipVideoRequest) => {
-    const resolvedVideoPath = normalizeExistingFile(request?.videoPath, "videoPath");
-    const startTime = typeof request?.startTime === "string" ? request.startTime.trim() : "";
-    const endTime = typeof request?.endTime === "string" ? request.endTime.trim() : "";
-    const outputPathInput = typeof request?.outputPath === "string" ? request.outputPath.trim() : "";
-    const mode = request?.mode;
+    return withMediaRun(event, async (run) => {
+      const resolvedVideoPath = normalizeExistingFile(request?.videoPath, "videoPath");
+      const startTime = typeof request?.startTime === "string" ? request.startTime.trim() : "";
+      const endTime = typeof request?.endTime === "string" ? request.endTime.trim() : "";
+      const outputPathInput = typeof request?.outputPath === "string" ? request.outputPath.trim() : "";
+      const mode = request?.mode;
 
-    if (startTime === "") {
-      throw new Error("startTime must be a non-empty string");
-    }
+      if (startTime === "") {
+        throw new Error("startTime must be a non-empty string");
+      }
 
-    if (endTime === "") {
-      throw new Error("endTime must be a non-empty string");
-    }
+      if (endTime === "") {
+        throw new Error("endTime must be a non-empty string");
+      }
 
-    if (outputPathInput === "") {
-      throw new Error("outputPath must be a non-empty string");
-    }
+      if (outputPathInput === "") {
+        throw new Error("outputPath must be a non-empty string");
+      }
 
-    if (mode !== "copy" && mode !== "encode") {
-      throw new Error("mode must be 'copy' or 'encode'");
-    }
+      if (mode !== "copy" && mode !== "encode") {
+        throw new Error("mode must be 'copy' or 'encode'");
+      }
 
-    const resolvedOutputPath = path.resolve(outputPathInput);
-    const outputDir = path.dirname(resolvedOutputPath);
-    if (!existsSync(outputDir)) {
-      mkdirSync(outputDir, { recursive: true });
-    }
+      const resolvedOutputPath = path.resolve(outputPathInput);
+      const outputDir = path.dirname(resolvedOutputPath);
+      if (!existsSync(outputDir)) {
+        mkdirSync(outputDir, { recursive: true });
+      }
 
-    const args =
-      mode === "copy"
-        ? ["-y", "-ss", startTime, "-to", endTime, "-i", resolvedVideoPath, "-c", "copy", resolvedOutputPath]
-        : [
-            "-y",
-            "-ss",
-            startTime,
-            "-to",
-            endTime,
-            "-i",
-            resolvedVideoPath,
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-crf",
-            "20",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            resolvedOutputPath
-          ];
+      const args =
+        mode === "copy"
+          ? ["-y", "-ss", startTime, "-to", endTime, "-i", resolvedVideoPath, "-c", "copy", resolvedOutputPath]
+          : [
+              "-y",
+              "-ss",
+              startTime,
+              "-to",
+              endTime,
+              "-i",
+              resolvedVideoPath,
+              "-c:v",
+              "libx264",
+              "-preset",
+              "veryfast",
+              "-crf",
+              "20",
+              "-c:a",
+              "aac",
+              "-b:a",
+              "192k",
+              resolvedOutputPath
+            ];
 
-    await runTool(event, "ffmpeg", resolveBinaryPath("ffmpeg.exe"), args, path.dirname(resolvedVideoPath));
+      await runTool(event, run, "ffmpeg", resolveBinaryPath("ffmpeg.exe"), args, path.dirname(resolvedVideoPath));
+      throwIfMediaRunCancelled(run);
 
-    return {
-      outputPath: resolvedOutputPath,
-      mode
-    };
+      return {
+        outputPath: resolvedOutputPath,
+        mode
+      };
+    });
   });
 
   ipcMain.handle("run-whisper", async (event, input: unknown): Promise<RunWhisperResult> => {
-    const request = normalizeRunWhisperRequest(input);
-    const audioPath = normalizeExistingFile(request.audioPath, "audioPath");
+    return withMediaRun(event, async (run) => {
+      const request = normalizeRunWhisperRequest(input);
+      const audioPath = normalizeExistingFile(request.audioPath, "audioPath");
 
-    const tempDir = resolveTempDir();
-    const outputBase = path.resolve(tempDir, "captions");
-    const tempSrtPath = `${outputBase}.srt`;
-    const tempVttPath = `${outputBase}.vtt`;
+      const tempDir = resolveTempDir();
+      const outputBase = path.resolve(tempDir, "captions");
+      const tempSrtPath = `${outputBase}.srt`;
+      const tempVttPath = `${outputBase}.vtt`;
 
-    const modelPath = resolveModelPath();
+      const modelPath = resolveModelPath();
 
-    if (!existsSync(modelPath)) {
-      throw new Error(`Model not found: ${modelPath}`);
-    }
+      if (!existsSync(modelPath)) {
+        throw new Error(`Model not found: ${modelPath}`);
+      }
 
-    const whisperAudioPath = await resolveWhisperAudioPath(event, audioPath);
-    const args = ["-m", modelPath, "-f", whisperAudioPath, "-of", outputBase, "-osrt", "-ovtt"];
+      const whisperAudioPath = await resolveWhisperAudioPath(event, run, audioPath);
+      const args = ["-m", modelPath, "-f", whisperAudioPath, "-of", outputBase, "-osrt", "-ovtt"];
 
-    await runTool(event, "whisper", resolveBinaryPath("whisper.exe"), args, path.dirname(whisperAudioPath));
+      await runTool(event, run, "whisper", resolveBinaryPath("whisper.exe"), args, path.dirname(whisperAudioPath));
+      throwIfMediaRunCancelled(run);
 
-    if (!existsSync(tempSrtPath) || !existsSync(tempVttPath)) {
-      throw new Error("Whisper finished without producing expected SRT/VTT files");
-    }
+      if (!existsSync(tempSrtPath) || !existsSync(tempVttPath)) {
+        throw new Error("Whisper finished without producing expected SRT/VTT files");
+      }
 
-    const srtText = readFileSync(tempSrtPath, "utf8");
+      const srtText = readFileSync(tempSrtPath, "utf8");
+      throwIfMediaRunCancelled(run);
 
-    return { srtPath: tempSrtPath, vttPath: tempVttPath, modelPath, srtText };
+      return { srtPath: tempSrtPath, vttPath: tempVttPath, modelPath, srtText };
+    });
   });
 
   ipcMain.handle("save-file-as", async (event, request: SaveFileAsRequest): Promise<string | null> => {

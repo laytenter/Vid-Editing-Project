@@ -1,6 +1,7 @@
 ﻿import { contextBridge, ipcRenderer } from "electron";
 import type {
   AppSettings,
+  CaptionProjectSession,
   ClipVideoRequest,
   ClipVideoResult,
   PersistedSettings,
@@ -19,8 +20,20 @@ const videoToolsApi = {
   setSettings: (partial: Partial<PersistedSettings>): Promise<AppSettings> => {
     return ipcRenderer.invoke("settings:set", partial);
   },
+  getCaptionProject: (): Promise<CaptionProjectSession | null> => {
+    return ipcRenderer.invoke("caption-project:get");
+  },
+  setCaptionProject: (session: CaptionProjectSession): Promise<void> => {
+    return ipcRenderer.invoke("caption-project:set", session);
+  },
+  cancelActiveMediaProcess: (): Promise<boolean> => {
+    return ipcRenderer.invoke("media-process:cancel");
+  },
   openPath: (targetPath: string): Promise<boolean> => {
     return ipcRenderer.invoke("open-path", targetPath);
+  },
+  pathExists: (targetPath: string): Promise<boolean> => {
+    return ipcRenderer.invoke("path-exists", targetPath);
   },
   openTempFolder: (): Promise<boolean> => {
     return ipcRenderer.invoke("open-temp-folder");

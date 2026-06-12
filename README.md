@@ -27,3 +27,5 @@ npm start
 6. Create a single clip, or queue several ranges and click **Export All Clips**.
 
 Caption and extracted-audio saves use a save dialog. Clips are exported automatically beside the selected video. All media processing stays local.
+
+Active FFmpeg or Whisper work can be cancelled from the status panel. The most recent caption project is restored automatically after restarting the app.

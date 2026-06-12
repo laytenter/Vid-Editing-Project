@@ -8,8 +8,18 @@ export interface PersistedSettings {
   themeMode: "system" | "dark" | "light";
 }
 
+export type AudioSourceKind = "uploaded" | "extracted" | null;
+
 export interface AppSettings extends PersistedSettings {
   documentsDir: string;
+}
+
+export interface CaptionSegment {
+  index: number;
+  start: string;
+  end: string;
+  text: string;
+  edited?: boolean;
 }
 
 export interface ExtractAudioResult {
@@ -29,6 +39,29 @@ export interface RunWhisperResult {
 }
 
 export type ClipMode = "copy" | "encode";
+
+export interface QueuedClip {
+  id: number;
+  videoPath: string;
+  startTime: string;
+  endTime: string;
+  mode: ClipMode;
+  preview: string;
+}
+
+export interface CaptionProjectSession {
+  version: 1;
+  selectedVideoPath: string | null;
+  audioPath: string | null;
+  audioSourceKind: AudioSourceKind;
+  srtPath: string | null;
+  vttPath: string | null;
+  captionSegments: CaptionSegment[];
+  queuedClips: QueuedClip[];
+  clipStart: string;
+  clipEnd: string;
+  clipMode: ClipMode;
+}
 
 export interface ClipVideoRequest {
   videoPath: string;

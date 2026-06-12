@@ -43,7 +43,10 @@
   <section class="paths action-status-panel workspace-card compact-card" aria-live="polite">
     <div class="action-status-header">
       <span id="actionStatus" class="label">Idle</span>
-      <span id="actionProgressText" class="action-progress-text">Idle</span>
+      <div class="action-status-controls">
+        <span id="actionProgressText" class="action-progress-text">Idle</span>
+        <button id="cancelActionButton" class="cancel-action-button" type="button" hidden>Cancel</button>
+      </div>
     </div>
     <div id="actionProgressTrack" class="action-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" title="Action progress">
       <div id="actionProgressBar" class="action-progress-bar"></div>
@@ -149,6 +152,8 @@
   </div>
 
   <script>var exports = {}; var module = { exports: exports };</script>
+  <script src="./timestamp-utils.js"></script>
+  <script src="./subtitle-utils.js"></script>
   <script src="./renderer.js"></script>
 </body>
 </html>
