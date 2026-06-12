@@ -377,6 +377,10 @@ function refreshPaths(): void {
   audioPathNode.textContent = audioPath ?? "(none)";
   srtPathNode.textContent = srtPath ?? "(none)";
   vttPathNode.textContent = vttPath ?? "(none)";
+  selectedVideoPathNode.title = selectedVideoPath ?? "";
+  audioPathNode.title = audioPath ?? "";
+  srtPathNode.title = srtPath ?? "";
+  vttPathNode.title = vttPath ?? "";
   const sourceStatus = getCaptionSourceStatus();
   captionSourceStatusNode.textContent = sourceStatus.label;
   captionSourceStatusNode.dataset.state = sourceStatus.state;
@@ -1209,13 +1213,23 @@ function renderQueuedClips(): void {
     const row = document.createElement("div");
     row.className = "queued-clip-row";
 
+    const metadataNode = document.createElement("div");
+    metadataNode.className = "queued-clip-metadata";
+
     const timeNode = document.createElement("div");
     timeNode.className = "queued-clip-time";
     timeNode.textContent = `${clip.startTime} -> ${clip.endTime}`;
 
+    const modeNode = document.createElement("span");
+    modeNode.className = "queued-clip-mode";
+    modeNode.textContent = clip.mode === "encode" ? "Encode" : "Copy";
+
+    metadataNode.append(timeNode, modeNode);
+
     const previewNode = document.createElement("div");
     previewNode.className = "queued-clip-preview";
     previewNode.textContent = clip.preview || "(manual range)";
+    previewNode.title = previewNode.textContent;
 
     const removeButton = document.createElement("button");
     removeButton.type = "button";
@@ -1228,7 +1242,7 @@ function renderQueuedClips(): void {
       scheduleCaptionProjectSave();
     });
 
-    row.append(timeNode, previewNode, removeButton);
+    row.append(metadataNode, previewNode, removeButton);
     queuedClipsListNode.appendChild(row);
   }
 

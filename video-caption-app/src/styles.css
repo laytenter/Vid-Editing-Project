@@ -170,8 +170,8 @@ h2 {
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(270px, 0.9fr) minmax(360px, 1.45fr) minmax(290px, 1fr);
-  gap: 12px;
+  grid-template-columns: minmax(285px, 1fr) minmax(340px, 1.4fr) minmax(245px, 0.9fr);
+  gap: 14px;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -179,7 +179,7 @@ h2 {
 
 .workspace-column {
   display: grid;
-  gap: 12px;
+  gap: 14px;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -205,9 +205,9 @@ h2 {
 
 .source-panel {
   display: grid;
-  gap: 8px;
+  gap: 12px;
   margin: 0;
-  padding: 10px;
+  padding: 14px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--source-background);
@@ -218,7 +218,7 @@ h2 {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
   margin-bottom: 0;
 }
@@ -237,6 +237,7 @@ h2 {
   max-width: 46rem;
   color: var(--muted);
   font-size: 0.86rem;
+  line-height: 1.45;
 }
 
 .status-pill {
@@ -273,7 +274,7 @@ h2 {
 .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
   margin-bottom: 10px;
 }
@@ -289,34 +290,52 @@ h2 {
 
 .source-actions {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
   margin-bottom: 0;
 }
 
-.source-panel .actions button,
-.clip-card .actions button,
-.clip-card .actions input,
-.clip-card .actions select {
-  flex: 1 1 8.5rem;
+.source-actions #saveAudioButton {
+  grid-column: 1 / -1;
 }
 
 .source-actions button {
   flex: none;
-  min-height: 28px;
-  padding: 5px 6px;
-  font-size: 0.78rem;
+  min-height: 36px;
+  padding: 7px 10px;
+  font-size: 0.8rem;
+}
+
+.clip-card .actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 0;
+}
+
+.clip-card .actions input,
+.clip-card .actions select,
+.clip-card .actions button {
+  min-height: 36px;
 }
 
 .clip-card .actions input,
 .clip-card .actions select {
-  padding: 7px 9px;
+  padding: 8px 10px;
   border-radius: 8px;
 }
 
+.clip-card .actions select {
+  grid-column: 1 / -1;
+}
+
 button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
   min-width: 0;
-  padding: 7px 10px;
+  padding: 7px 12px;
   border-radius: 8px;
   border: 1px solid var(--primary-strong);
   background: var(--primary-button);
@@ -324,11 +343,13 @@ button {
   cursor: pointer;
   font: inherit;
   font-size: 0.88rem;
-  line-height: 1.2;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
 }
 
 button:disabled {
-  opacity: 0.55;
+  opacity: 0.62;
   cursor: default;
 }
 
@@ -354,13 +375,13 @@ input[type="checkbox"] {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 10px;
+  padding: 14px;
   margin: 0;
 }
 
 .path-row {
   min-width: 0;
-  margin-bottom: 7px;
+  margin-bottom: 10px;
   overflow-wrap: anywhere;
 }
 
@@ -375,11 +396,11 @@ input[type="checkbox"] {
 
 .action-status-panel {
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
 .compact-card {
-  padding: 6px 10px;
+  padding: 10px 12px;
 }
 
 .action-status-header {
@@ -405,7 +426,8 @@ input[type="checkbox"] {
   border-color: var(--danger);
   background: transparent;
   color: var(--danger);
-  padding: 4px 8px;
+  min-height: 30px;
+  padding: 5px 9px;
   font-size: 0.78rem;
 }
 
@@ -455,13 +477,16 @@ input[type="checkbox"] {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .caption-segments-header-actions {
-  display: inline-flex;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
 }
 
@@ -471,7 +496,8 @@ input[type="checkbox"] {
 }
 
 .caption-clear-selection {
-  padding: 5px 10px;
+  min-height: 32px;
+  padding: 6px 10px;
   border-color: var(--border-soft);
   background: var(--surface);
   color: var(--primary);
@@ -479,7 +505,8 @@ input[type="checkbox"] {
 }
 
 .caption-save-button {
-  padding: 5px 9px;
+  min-height: 32px;
+  padding: 6px 10px;
   border-color: var(--border-soft);
   background: var(--surface);
   color: var(--primary);
@@ -488,9 +515,9 @@ input[type="checkbox"] {
 
 .caption-selection-summary {
   display: grid;
-  gap: 3px;
-  margin-bottom: 8px;
-  padding: 9px 10px;
+  gap: 5px;
+  margin-bottom: 10px;
+  padding: 11px 12px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-soft);
@@ -511,12 +538,13 @@ input[type="checkbox"] {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .caption-search-row input {
   min-width: 0;
-  padding: 8px 10px;
+  min-height: 36px;
+  padding: 8px 11px;
   border-radius: 8px;
 }
 
@@ -529,19 +557,22 @@ input[type="checkbox"] {
 .queued-clips-panel {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 10px;
+  gap: 12px;
 }
 
 .queued-clips-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
 }
 
 .queued-clips-actions {
-  display: inline-flex;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
 }
 
@@ -553,7 +584,7 @@ input[type="checkbox"] {
 .queued-clips-list {
   display: grid;
   align-content: start;
-  gap: 6px;
+  gap: 8px;
   min-height: 0;
   max-height: none;
   overflow: auto;
@@ -566,31 +597,65 @@ input[type="checkbox"] {
 
 .queued-clip-row {
   display: grid;
-  grid-template-columns: minmax(13rem, 16rem) minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px 10px;
+  padding: 11px 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
 }
 
-.queued-clip-time {
-  color: var(--primary);
-  font-family: Consolas, "Courier New", monospace;
-  font-size: 0.86rem;
-  white-space: nowrap;
+.queued-clip-metadata {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
 }
 
-.queued-clip-preview {
+.queued-clip-time {
   min-width: 0;
-  color: var(--muted);
-  font-size: 0.9rem;
+  color: var(--primary);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 0.82rem;
+  line-height: 1.4;
   overflow-wrap: anywhere;
 }
 
+.queued-clip-mode {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--primary);
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.queued-clip-preview {
+  display: -webkit-box;
+  grid-column: 1 / -1;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
 .queued-clip-remove {
-  padding: 5px 10px;
+  align-self: start;
+  grid-column: 1 / -1;
+  justify-self: end;
+  min-height: 32px;
+  padding: 6px 10px;
   border-color: var(--border);
   background: var(--surface);
   color: var(--primary);
@@ -600,7 +665,7 @@ input[type="checkbox"] {
 .preview-panel {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 10px;
+  gap: 12px;
 }
 
 .preview-card {
@@ -636,7 +701,7 @@ input[type="checkbox"] {
 .caption-segments-list {
   display: grid;
   align-content: start;
-  gap: 6px;
+  gap: 8px;
   min-height: 0;
   max-height: none;
   overflow: auto;
@@ -645,6 +710,7 @@ input[type="checkbox"] {
 .captions-card {
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 0;
 }
 
 .caption-segments-empty {
@@ -654,11 +720,11 @@ input[type="checkbox"] {
 
 .caption-segment-row {
   display: grid;
-  grid-template-columns: minmax(9rem, 12rem) minmax(0, 1fr) auto;
-  align-items: start;
+  grid-template-columns: minmax(7.5rem, 8.5rem) minmax(0, 1fr) auto;
+  align-items: center;
   gap: 12px;
   width: 100%;
-  padding: 10px;
+  padding: 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
@@ -709,16 +775,23 @@ input[type="checkbox"] {
 
 .caption-segment-time {
   display: grid;
-  gap: 3px;
+  align-self: start;
+  gap: 4px;
   color: var(--primary);
   font-family: Consolas, "Courier New", monospace;
-  font-size: 0.88rem;
+  font-size: 0.82rem;
+  line-height: 1.35;
   white-space: nowrap;
 }
 
 .caption-segment-text {
+  display: -webkit-box;
   min-width: 0;
+  line-height: 1.5;
+  overflow: hidden;
   overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
 }
 
 .caption-edited-dot {
@@ -732,7 +805,10 @@ input[type="checkbox"] {
 }
 
 .caption-segment-edit {
-  padding: 5px 9px;
+  align-self: center;
+  justify-self: end;
+  min-height: 32px;
+  padding: 6px 10px;
   border-color: var(--border);
   background: var(--surface);
   color: var(--primary);
@@ -743,7 +819,7 @@ input[type="checkbox"] {
   min-width: 0;
   width: 100%;
   min-height: 4.25rem;
-  padding: 8px;
+  padding: 10px;
   border: 1px solid var(--border-range);
   border-radius: 6px;
   font: inherit;
@@ -874,13 +950,53 @@ pre {
 
 #dropZone {
   margin-bottom: 0;
-  padding: 9px;
+  padding: 12px;
   border: 2px dashed var(--primary-strong);
   border-radius: 8px;
   text-align: center;
   background: var(--drop-background);
   color: var(--primary);
   font-weight: 600;
+}
+
+.file-paths-card {
+  display: grid;
+  gap: 0;
+}
+
+.file-paths-card .path-row {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.file-paths-card .path-row:first-child {
+  padding-top: 0;
+}
+
+.file-paths-card .path-row:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.file-paths-card .label {
+  margin-right: 0;
+  color: var(--text-strong);
+  font-size: 0.78rem;
+}
+
+.file-path-value {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted-subtle);
+  font-size: 0.76rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 #dropZone.drop-active {
@@ -890,7 +1006,7 @@ pre {
 
 @media (max-width: 1180px) {
   .workspace {
-    grid-template-columns: minmax(230px, 0.85fr) minmax(320px, 1.45fr) minmax(230px, 1fr);
+    grid-template-columns: minmax(275px, 1fr) minmax(330px, 1.4fr) minmax(230px, 0.85fr);
     grid-template-rows: minmax(0, 1fr);
   }
 
@@ -900,14 +1016,34 @@ pre {
     grid-template-rows: minmax(96px, 1fr) auto;
   }
 
-  .queued-clip-row {
-    grid-template-columns: minmax(10rem, 12rem) minmax(0, 1fr) auto;
-  }
-}
-
-@media (max-width: 1320px) {
   .section-copy {
     display: none;
+  }
+
+  .section-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .status-pill {
+    justify-self: start;
+    max-width: 100%;
+  }
+
+  .caption-segment-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .caption-segment-time {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+  }
+
+  .caption-segment-text,
+  .caption-segment-row.is-editing .caption-segment-editor {
+    grid-column: 1 / -1;
   }
 }
 
@@ -958,7 +1094,7 @@ pre {
 
   .source-panel,
   .paths {
-    padding: 7px;
+    padding: 9px;
   }
 
   button,
@@ -969,7 +1105,8 @@ pre {
   }
 
   button {
-    padding: 6px 7px;
+    min-height: 32px;
+    padding: 6px 8px;
   }
 
   .actions {
@@ -982,9 +1119,9 @@ pre {
   }
 
   .source-actions button {
-    min-height: 25px;
-    padding: 4px 4px;
-    font-size: 0.68rem;
+    min-height: 32px;
+    padding: 5px 6px;
+    font-size: 0.72rem;
   }
 
   .clip-card .actions {
@@ -1015,11 +1152,15 @@ pre {
   .caption-segment-row,
   .queued-clip-row {
     grid-template-columns: 1fr;
-    gap: 6px;
-    padding: 7px;
+    gap: 8px;
+    padding: 9px;
   }
 
   .caption-segment-row.is-editing .caption-segment-editor {
+    grid-column: 1;
+  }
+
+  .queued-clip-preview {
     grid-column: 1;
   }
 
@@ -1059,7 +1200,7 @@ pre {
 
   .source-panel,
   .paths {
-    padding: 8px;
+    padding: 9px;
   }
 
   #dropZone {
