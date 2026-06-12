@@ -14,23 +14,23 @@ This project provides a privacy-friendly local workflow for generating captions,
 
 ## Features
 
-- Select video files via file dialog or drag and drop
-- Upload existing `.wav`, `.mp3`, or `.m4a` audio files when you only need captions
+- Select video or audio files via file dialog or single-file drag and drop
+- Open video through **File > Open Video** or `Ctrl+O`
+- Upload existing audio when you only need captions
 - Extract mono 16 kHz WAV audio from video with FFmpeg
 - Convert uploaded `.m4a` audio to temporary mono 16 kHz WAV before Whisper
 - Generate `.srt` and `.vtt` captions locally with the local Whisper runtime
 - Show best-effort action status for extraction, conversion, captioning, and clipping
-- Keep raw FFmpeg/Whisper logs available behind a Show raw logs toggle
+- Inspect and filter FFmpeg/Whisper output in a resizable log drawer
 - Preview selected video or uploaded audio in an embedded HTML5 player
 - Parse generated captions into a scrollable Caption Segments list
 - Click caption segments to seek preview playback and set clip ranges
 - Select multi-caption clip ranges with a two-click start/end workflow
 - Search/filter caption segments with highlighted matches
 - Edit caption text inline before exporting subtitles
-- Save edited captions as regenerated `.srt` or `.vtt`
+- Save extracted audio and edited captions through save dialogs
 - Create one-off video clips from start/end timestamps
 - Queue multiple clip ranges and export them sequentially
-- Configure output directory and auto-save settings
 - Choose Appearance theme: System, Dark, or Light
 
 ## Screenshots
@@ -59,23 +59,23 @@ The public repository keeps the Electron app under `video-caption-app/`. Paths b
 ```powershell
 cd video-caption-app
 npm install
-npm run build
+.\scripts\setup-windows.ps1
 npm start
 ```
 
+`npm start` builds the TypeScript and static files before launching Electron.
+
 ## Runtime dependencies
 
-This repository keeps the app source and smaller runtime files in Git, but does not commit oversized FFmpeg/ffprobe executables because GitHub rejects blobs over 100 MB. Keep those files locally in `video-caption-app/bin/`; inside the app directory this is `bin/`.
+This repository keeps the app source in Git. Runtime executables are local files and are not committed.
 
-Expected runtime files include these paths from the repository root:
+Before `npm start`, place all three required runtime executables in `video-caption-app/bin/`:
 
 - `video-caption-app/bin/ffmpeg.exe`
 - `video-caption-app/bin/ffprobe.exe`
 - `video-caption-app/bin/whisper.exe`
 
-The local FFmpeg/ffprobe binaries have been updated to a stable Gyan FFmpeg essentials build. Previous FFmpeg binaries may be kept locally as `.previous.exe` backups during development.
-
-`video-caption-app/scripts/setup-windows.ps1` creates the local runtime folders and downloads the Whisper model. It does not download FFmpeg; use a Windows FFmpeg build such as Gyan FFmpeg essentials and place `ffmpeg.exe` and `ffprobe.exe` in `video-caption-app/bin/`.
+`scripts/setup-windows.ps1` creates the local runtime folders and downloads the required `ggml-base.en.bin` Whisper model. It does not download `ffmpeg.exe`, `ffprobe.exe`, or `whisper.exe`.
 
 Whisper model files are loaded from the user models directory, for example:
 
@@ -83,18 +83,37 @@ Whisper model files are loaded from the user models directory, for example:
 %APPDATA%\video-caption-app\models\
 ```
 
-Models must currently be placed there manually by the user. Automatic model download may be added in a future release.
+The app currently uses `ggml-base.en.bin`. Re-run the setup script with `-Force` directly if the model needs to be replaced:
 
-## Basic usage
+```powershell
+.\scripts\setup-windows.ps1 -Force
+```
 
-1. Upload a video or supported audio file (`.wav`, `.mp3`, or `.m4a`) using the button or drag/drop.
-2. If you started with video, click **Extract Audio**.
-3. Click **Generate Captions**.
-4. Review captions in **Caption Segments**.
-5. Search captions, preview playback, and optionally edit caption text.
-6. Click caption rows to set clip start/end ranges.
-7. Export captions with **Save SRT** or **Save VTT**.
-8. Create a single clip with **Create clip**, or queue ranges with **Add clip range** and export them with **Export All Clips**.
+## Current workflow
+
+### Start from video
+
+1. Click **Upload Video**, drag one supported video into the drop zone, or use **File > Open Video**.
+2. Click **Extract Audio**. FFmpeg creates a temporary mono 16 kHz WAV, then the app immediately opens a save dialog for an optional permanent copy.
+3. Click **Generate Captions**. Whisper writes temporary SRT/VTT files and populates **Caption Segments**.
+4. Review, search, and edit the caption text. Click caption rows to seek the preview and populate the clip start/end fields.
+5. Click **Save SRT** or **Save VTT** and choose a destination. The exported file includes current inline edits.
+6. Create a single clip with **Create clip**, or click **Add clip range** for each range and then **Export All Clips**.
+
+### Start from audio
+
+1. Click **Upload Audio** or drag one supported audio file into the drop zone.
+2. Click **Generate Captions**.
+3. Review and edit the generated segments, then save SRT or VTT.
+
+Uploaded `.m4a` files are converted to temporary mono 16 kHz WAV files before transcription. Other accepted audio formats are passed directly to Whisper.
+
+### Supported source formats
+
+- Video: `.mp4`, `.mov`, `.mkv`, `.avi`, `.webm`, `.m4v`
+- Audio: `.wav`, `.mp3`, `.m4a`, `.aac`, `.flac`, `.ogg`, `.opus`, `.wma`, `.aiff`, `.aif`
+
+Selecting a new video clears the current caption source, caption segments, and queued clips. Temporary audio and subtitle files can be inspected through **File > Reveal Temp Folder**.
 
 ## Caption-assisted editing
 
@@ -138,31 +157,26 @@ The preview never autoplays. Caption row clicks pause the active player if neede
 
 ## Clip export
 
-Single clip export uses the existing FFmpeg clipping flow and selected mode:
+Enter or select a start/end range in `HH:MM:SS.mmm` format, then choose an FFmpeg clipping mode:
 
-- **Copy (fast)**
-- **Encode (accurate)**
+- **Copy (fast)** uses stream copy. It is faster, but cuts may align to nearby keyframes.
+- **Encode (accurate)** re-encodes H.264 video and AAC audio for more accurate boundaries.
 
-Batch clip export lets you queue multiple clip ranges from the current `clipStart` and `clipEnd` fields.
+**Create clip** exports one timestamped MP4 beside the selected video. **Add clip range** stores the current range and mode in the in-memory queue.
 
 - Queued clips are stored in renderer state only.
 - Each row shows start/end time, optional caption preview, and a remove button.
 - **Export All Clips** runs clips sequentially, not in parallel.
-- Output names use incremental suffixes such as `_clip_001`, `_clip_002`, and so on.
+- Batch output is written beside the selected video with incremental names such as `_clip_001.mp4`, `_clip_002.mp4`, and so on.
 - Failed queued clips are logged and the remaining queue continues.
+
+Clip exports do not open a save dialog.
 
 ## Settings
 
 Persisted settings use `electron-store`.
 
-Current settings include:
-
-- Output folder
-- Save extracted WAV to output folder
-- Auto-save captions to output folder
-- Appearance theme
-
-Appearance modes:
+The only current persisted setting is **Settings > Appearance**:
 
 - **System** follows `prefers-color-scheme`
 - **Dark** forces dark mode
@@ -172,20 +186,21 @@ Theme changes apply immediately without restarting the app.
 
 ## Uploaded audio support
 
-- `.wav` uploads are passed directly to Whisper.
-- `.mp3` uploads are passed directly to Whisper.
+- Uploaded audio becomes the active caption source and is shown in the preview player.
 - `.m4a` uploads are converted with FFmpeg to temporary mono 16 kHz WAV before Whisper runs.
+- Other accepted audio formats are passed directly to Whisper.
+- Uploading audio alone does not enable video clipping.
 
 ## Logs and progress
 
-Raw FFmpeg and Whisper logs are preserved internally but hidden by default. Enable **Show raw logs** to view filtering and copy controls.
+Click **Show Log** to open the resizable log drawer. It can filter entries by FFmpeg, Whisper, or errors, copy the visible log, and optionally show noisy raw FFmpeg progress lines.
 
 The action status panel shows the current stage, such as extracting audio, converting audio, generating captions, or exporting clips. Progress percentage and estimated remaining time are shown only when the app has reliable tool output or duration data.
 
 ## Current limitations
 
 - Currently Windows-focused because the local runtime binaries are Windows builds.
-- Whisper models are not automatically downloaded yet.
+- The app currently uses the English `ggml-base.en.bin` Whisper model.
 - No packaged installer yet; run with `npm start`.
 - Queued clips and caption edits are not persisted after app restart.
 - Caption timestamp editing is not available yet.
