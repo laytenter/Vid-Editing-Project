@@ -31,8 +31,18 @@
   --log-background: #111719;
   --log-text: #d6e1df;
   --mark-background: #fff1a8;
-  --shadow: 0 10px 28px rgba(34, 46, 43, 0.08);
-  --panel-shadow: 0 8px 22px rgba(34, 46, 43, 0.07);
+  --radius-control: 4px;
+  --radius-card: 5px;
+  --radius-panel: 6px;
+  --radius-token: 4px;
+  --shadow: 0 1px 1px rgba(34, 46, 43, 0.04), 0 12px 28px rgba(34, 46, 43, 0.08);
+  --panel-shadow: 0 1px 1px rgba(34, 46, 43, 0.04), 0 8px 20px rgba(34, 46, 43, 0.07);
+  --row-shadow: 0 1px 2px rgba(34, 46, 43, 0.06);
+  --floating-shadow: 0 18px 42px rgba(18, 26, 24, 0.18);
+  --action-shadow: 0 5px 12px rgba(35, 111, 101, 0.16);
+  --action-shadow-hover: 0 7px 16px rgba(35, 111, 101, 0.2);
+  --inset-highlight: rgba(255, 255, 255, 0.65);
+  --surface-action-group: rgba(255, 255, 255, 0.58);
   --drop-background: rgba(239, 245, 241, 0.92);
   --drop-active-background: #d9eee6;
 }
@@ -70,8 +80,14 @@
   --log-background: #0d1117;
   --log-text: #d7e5e1;
   --mark-background: #665a1f;
-  --shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
-  --panel-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+  --shadow: 0 1px 1px rgba(0, 0, 0, 0.18), 0 12px 30px rgba(0, 0, 0, 0.28);
+  --panel-shadow: 0 1px 1px rgba(0, 0, 0, 0.16), 0 8px 24px rgba(0, 0, 0, 0.24);
+  --row-shadow: 0 1px 2px rgba(0, 0, 0, 0.24);
+  --floating-shadow: 0 20px 46px rgba(0, 0, 0, 0.38);
+  --action-shadow: 0 5px 12px rgba(0, 0, 0, 0.24);
+  --action-shadow-hover: 0 7px 18px rgba(0, 0, 0, 0.32);
+  --inset-highlight: rgba(255, 255, 255, 0.08);
+  --surface-action-group: rgba(13, 18, 18, 0.26);
   --drop-background: rgba(37, 48, 46, 0.92);
   --drop-active-background: #24453d;
 }
@@ -123,7 +139,7 @@ h2 {
   padding: 5px 9px;
   border: 1px solid var(--border);
   border-left: 3px solid var(--primary);
-  border-radius: 6px;
+  border-radius: var(--radius-panel);
   background: var(--surface-elevated);
   box-shadow: var(--panel-shadow);
 }
@@ -178,6 +194,7 @@ h2 {
   padding: 5px 10px;
   border-color: var(--border-soft);
   background: var(--surface);
+  box-shadow: none;
   color: var(--primary);
   font-size: 0.78rem;
   font-weight: 700;
@@ -186,6 +203,7 @@ h2 {
 .header-details-button[aria-expanded="true"] {
   border-color: var(--primary-strong);
   background: var(--surface-selected);
+  box-shadow: var(--row-shadow);
   color: var(--text-strong);
 }
 
@@ -227,9 +245,9 @@ h2 {
   margin: 0;
   padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-card);
   background: var(--source-background);
-  box-shadow: var(--panel-shadow);
+  box-shadow: var(--shadow);
 }
 
 .section-header {
@@ -266,7 +284,7 @@ h2 {
   max-width: 12rem;
   padding: 0 9px;
   border: 1px solid var(--border-soft);
-  border-radius: 999px;
+  border-radius: var(--radius-token);
   background: var(--progress-track);
   color: var(--primary);
   font-size: 0.76rem;
@@ -296,7 +314,7 @@ h2 {
   gap: 2px;
   padding: 7px 9px;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: var(--radius-card);
   background: var(--surface-soft);
   color: var(--muted);
   font-size: 0.74rem;
@@ -343,6 +361,7 @@ h2 {
 
 .actions-secondary button {
   background: var(--surface);
+  box-shadow: none;
   color: var(--primary);
 }
 
@@ -355,7 +374,12 @@ h2 {
 
 .source-action-group {
   display: grid;
-  gap: 5px;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface-action-group);
+  box-shadow: var(--row-shadow);
 }
 
 .source-action-label {
@@ -383,6 +407,7 @@ h2 {
   border-color: var(--border-soft);
   background: var(--surface);
   color: var(--primary);
+  box-shadow: none;
 }
 
 .source-save-button {
@@ -405,7 +430,7 @@ h2 {
 .clip-card .actions input,
 .clip-card .actions select {
   padding: 7px 9px;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
 }
 
 .clip-card .actions select {
@@ -419,9 +444,10 @@ button {
   min-height: 34px;
   min-width: 0;
   padding: 7px 11px;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   border: 1px solid transparent;
   background: var(--primary-button);
+  box-shadow: var(--action-shadow);
   color: var(--primary-contrast);
   cursor: pointer;
   font: inherit;
@@ -431,11 +457,12 @@ button {
   overflow-wrap: anywhere;
   text-align: center;
   white-space: normal;
-  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, transform 120ms ease;
+  transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease, color 120ms ease, transform 120ms ease;
 }
 
 button:hover:not(:disabled) {
   background: var(--primary-strong);
+  box-shadow: var(--action-shadow-hover);
   transform: translateY(-1px);
 }
 
@@ -445,8 +472,38 @@ button:focus-visible {
 }
 
 button:disabled {
+  box-shadow: none;
   opacity: 0.62;
   cursor: default;
+  transform: none;
+}
+
+.secondary-button:hover:not(:disabled),
+.header-details-button:hover:not(:disabled),
+.header-log-button:hover:not(:disabled),
+.caption-clear-selection:hover:not(:disabled),
+.caption-save-button:hover:not(:disabled),
+.details-drawer-close:hover:not(:disabled),
+.log-drawer-close:hover:not(:disabled),
+#copyLogButton:hover:not(:disabled),
+.queued-clip-remove:hover:not(:disabled),
+.caption-segment-edit:hover:not(:disabled) {
+  border-color: var(--primary-strong);
+  background: var(--surface-soft);
+  box-shadow: var(--row-shadow);
+  color: var(--primary);
+}
+
+.header-details-button[aria-expanded="true"]:hover:not(:disabled) {
+  background: var(--surface-selected);
+  color: var(--text-strong);
+}
+
+.cancel-action-button:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: var(--surface-soft);
+  box-shadow: var(--row-shadow);
+  color: var(--danger);
 }
 
 input,
@@ -454,7 +511,7 @@ select,
 textarea {
   min-width: 0;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: var(--input-background);
   color: var(--input-text);
   font: inherit;
@@ -478,7 +535,7 @@ input[type="checkbox"] {
 .paths {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-card);
   padding: 12px;
   margin: 0;
   box-shadow: var(--panel-shadow);
@@ -506,7 +563,7 @@ input[type="checkbox"] {
   gap: 5px;
   border-color: var(--border-soft);
   background: var(--surface-soft);
-  box-shadow: none;
+  box-shadow: inset 0 1px 0 var(--inset-highlight);
 }
 
 .action-status-panel[data-state="done"] {
@@ -564,7 +621,7 @@ input[type="checkbox"] {
   width: 7px;
   height: 7px;
   flex: 0 0 auto;
-  border-radius: 999px;
+  border-radius: 50%;
   background: var(--muted-subtle);
   content: "";
 }
@@ -600,6 +657,7 @@ input[type="checkbox"] {
 .cancel-action-button {
   border-color: var(--danger);
   background: transparent;
+  box-shadow: none;
   color: var(--danger);
   min-height: 28px;
   padding: 5px 8px;
@@ -609,7 +667,7 @@ input[type="checkbox"] {
 .action-progress-track {
   height: 3px;
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: var(--radius-token);
   background: var(--progress-track);
 }
 
@@ -671,8 +729,9 @@ input[type="checkbox"] {
   gap: 3px;
   padding: 2px;
   border: 1px solid var(--border-soft);
-  border-radius: 7px;
+  border-radius: var(--radius-panel);
   background: var(--surface-soft);
+  box-shadow: var(--row-shadow);
 }
 
 .caption-segments-count {
@@ -685,6 +744,7 @@ input[type="checkbox"] {
   padding: 6px 9px;
   border-color: var(--border-soft);
   background: var(--surface);
+  box-shadow: none;
   color: var(--primary);
   font-size: 0.8rem;
 }
@@ -694,6 +754,7 @@ input[type="checkbox"] {
   padding: 6px 9px;
   border-color: transparent;
   background: var(--surface);
+  box-shadow: none;
   color: var(--primary);
   font-size: 0.78rem;
 }
@@ -711,7 +772,7 @@ input[type="checkbox"] {
   margin-bottom: 8px;
   padding: 9px 10px;
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: var(--radius-card);
   background: var(--surface-soft);
 }
 
@@ -753,7 +814,7 @@ input[type="checkbox"] {
   min-width: 0;
   min-height: 34px;
   padding: 7px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
 }
 
 .caption-search-count {
@@ -787,9 +848,9 @@ input[type="checkbox"] {
   min-width: min(320px, calc(100% - 18px));
   padding: 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-panel);
   background: var(--surface-elevated);
-  box-shadow: -16px 0 36px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--floating-shadow);
   pointer-events: none;
   transform: translateX(calc(100% + 14px));
   transition: transform 180ms ease;
@@ -822,12 +883,13 @@ input[type="checkbox"] {
   padding: 5px 10px;
   border-color: var(--border-soft);
   background: var(--surface);
+  box-shadow: none;
   color: var(--primary);
   font-size: 0.78rem;
 }
 
 .details-drawer .paths {
-  box-shadow: none;
+  box-shadow: var(--row-shadow);
 }
 
 .queued-clips-header {
@@ -872,8 +934,9 @@ input[type="checkbox"] {
   gap: 7px 9px;
   padding: 9px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-card);
   background: var(--surface);
+  box-shadow: var(--row-shadow);
 }
 
 .queued-clip-row.is-exporting {
@@ -904,7 +967,7 @@ input[type="checkbox"] {
   flex: 0 0 auto;
   padding: 3px 7px;
   border: 1px solid var(--border-soft);
-  border-radius: 999px;
+  border-radius: var(--radius-token);
   background: var(--surface-soft);
   color: var(--primary);
   font-size: 0.7rem;
@@ -917,7 +980,7 @@ input[type="checkbox"] {
   flex: 0 0 auto;
   padding: 3px 7px;
   border: 1px solid var(--primary-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-token);
   background: var(--primary-button);
   color: var(--primary-contrast);
   font-size: 0.7rem;
@@ -947,6 +1010,7 @@ input[type="checkbox"] {
   padding: 6px 9px;
   border-color: var(--border);
   background: var(--surface);
+  box-shadow: none;
   color: var(--primary);
   font-size: 0.8rem;
 }
@@ -977,7 +1041,7 @@ input[type="checkbox"] {
   min-height: 0;
   max-height: none;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-card);
   background: var(--log-background);
   object-fit: contain;
 }
@@ -1009,7 +1073,7 @@ input[type="checkbox"] {
   margin: 0;
   padding: 16px;
   border: 1px dashed var(--border-soft);
-  border-radius: 6px;
+  border-radius: var(--radius-card);
   background: var(--surface-soft);
   color: var(--muted-subtle);
   line-height: 1.45;
@@ -1029,8 +1093,9 @@ input[type="checkbox"] {
   width: 100%;
   padding: 10px 11px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-card);
   background: var(--surface);
+  box-shadow: var(--row-shadow);
   color: var(--text);
   cursor: pointer;
   font: inherit;
@@ -1073,19 +1138,19 @@ input[type="checkbox"] {
 .caption-segment-row.is-in-range {
   border-color: var(--border-range);
   background: var(--surface-range);
-  box-shadow: inset 4px 0 0 var(--border-range);
+  box-shadow: inset 4px 0 0 var(--border-range), var(--row-shadow);
 }
 
 .caption-segment-row.is-range-start {
   border-color: var(--primary);
   background: var(--surface-selected);
-  box-shadow: inset 5px 0 0 var(--primary), 0 0 0 1px var(--primary);
+  box-shadow: inset 5px 0 0 var(--primary), 0 0 0 1px var(--primary), var(--row-shadow);
 }
 
 .caption-segment-row.is-range-end {
   border-color: var(--success);
   background: var(--surface-selected);
-  box-shadow: inset 5px 0 0 var(--success), 0 0 0 1px var(--success);
+  box-shadow: inset 5px 0 0 var(--success), 0 0 0 1px var(--success), var(--row-shadow);
 }
 
 .caption-segment-row.is-playback-active {
@@ -1134,7 +1199,7 @@ input[type="checkbox"] {
   min-height: 18px;
   padding: 2px 5px;
   border: 1px solid var(--border-soft);
-  border-radius: 999px;
+  border-radius: var(--radius-token);
   background: var(--surface-soft);
   color: var(--text-strong);
   font-family: "Segoe UI", sans-serif;
@@ -1178,7 +1243,7 @@ input[type="checkbox"] {
   width: 0.45rem;
   height: 0.45rem;
   margin-left: 0.4rem;
-  border-radius: 999px;
+  border-radius: 50%;
   background: var(--success);
   vertical-align: middle;
 }
@@ -1190,6 +1255,7 @@ input[type="checkbox"] {
   padding: 6px 9px;
   border-color: var(--border);
   background: var(--surface);
+  box-shadow: none;
   color: var(--primary);
   font-size: 0.78rem;
 }
@@ -1200,7 +1266,7 @@ input[type="checkbox"] {
   min-height: 4rem;
   padding: 9px;
   border: 1px solid var(--border-range);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   font: inherit;
   resize: vertical;
 }
@@ -1220,7 +1286,7 @@ pre {
   margin: 0;
   background: var(--log-background);
   color: var(--log-text);
-  border-radius: 6px;
+  border-radius: var(--radius-card);
   padding: 10px;
   min-height: 0;
   height: 100%;
@@ -1247,7 +1313,7 @@ pre {
   padding: 12px;
   border-left: 1px solid var(--border);
   background: var(--surface);
-  box-shadow: -18px 0 42px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--floating-shadow);
   pointer-events: none;
   transform: translateX(100%);
   transition: transform 180ms ease;
@@ -1292,6 +1358,14 @@ pre {
 .log-drawer-close {
   border-color: var(--border-soft);
   background: var(--surface);
+  box-shadow: none;
+  color: var(--primary);
+}
+
+#copyLogButton {
+  border-color: var(--border-soft);
+  background: var(--surface);
+  box-shadow: none;
   color: var(--primary);
 }
 
@@ -1331,7 +1405,7 @@ pre {
   margin-bottom: 0;
   padding: 10px;
   border: 1px dashed var(--primary-strong);
-  border-radius: 6px;
+  border-radius: var(--radius-card);
   text-align: center;
   background: var(--drop-background);
   color: var(--primary);
@@ -1342,6 +1416,9 @@ pre {
 .file-paths-card {
   display: grid;
   gap: 0;
+  border-color: var(--border-soft);
+  background: var(--surface-soft);
+  box-shadow: none;
 }
 
 .file-paths-card .path-row {
@@ -1363,8 +1440,10 @@ pre {
 
 .file-paths-card .label {
   margin-right: 0;
-  color: var(--text-strong);
-  font-size: 0.74rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .file-path-value {
@@ -1372,7 +1451,7 @@ pre {
   min-width: 0;
   overflow: hidden;
   color: var(--muted-subtle);
-  font-size: 0.73rem;
+  font-size: 0.72rem;
   line-height: 1.4;
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
