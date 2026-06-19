@@ -20,6 +20,7 @@
       <h1>Video Caption App</h1>
       <p class="hero-tagline">Generate captions, export subtitle files, and clip footage locally with FFmpeg and Whisper.</p>
     </div>
+    <button id="detailsToggleButton" class="header-details-button" type="button" aria-controls="detailsDrawer" aria-expanded="false">Clips & Files</button>
     <button id="showLogButton" class="header-log-button" type="button">Show Log</button>
   </header>
 
@@ -131,7 +132,12 @@
   </section>
   </div>
 
-  <aside class="workspace-column details-column" aria-label="Output and logs">
+  <div id="detailsDrawerBackdrop" class="details-drawer-backdrop" hidden></div>
+  <aside id="detailsDrawer" class="workspace-column details-column details-drawer" aria-label="Clips and files" aria-hidden="true">
+  <div class="details-drawer-header">
+    <h2>Clips & Files</h2>
+    <button id="closeDetailsButton" class="details-drawer-close" type="button">Close</button>
+  </div>
   <section class="paths queued-clips-panel workspace-card">
     <div class="queued-clips-header">
       <span class="label">Queued Clips</span>

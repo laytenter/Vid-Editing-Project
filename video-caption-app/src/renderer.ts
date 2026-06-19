@@ -48,6 +48,10 @@ const vttPathNode = mustGet<HTMLElement>("vttPath");
 const logPanel = mustGet<HTMLPreElement>("logPanel");
 
 const dropZone = mustGet<HTMLDivElement>("dropZone");
+const detailsToggleButton = mustGet<HTMLButtonElement>("detailsToggleButton");
+const closeDetailsButton = mustGet<HTMLButtonElement>("closeDetailsButton");
+const detailsDrawer = mustGet<HTMLElement>("detailsDrawer");
+const detailsDrawerBackdrop = mustGet<HTMLElement>("detailsDrawerBackdrop");
 const showLogButton = mustGet<HTMLButtonElement>("showLogButton");
 const closeLogButton = mustGet<HTMLButtonElement>("closeLogButton");
 const logDrawer = mustGet<HTMLElement>("logDrawer");
@@ -943,6 +947,22 @@ function toggleLogDrawer(): void {
   openLogDrawer();
 }
 
+function setDetailsDrawerOpen(isOpen: boolean): void {
+  detailsDrawer.classList.toggle("is-open", isOpen);
+  detailsDrawer.setAttribute("aria-hidden", isOpen ? "false" : "true");
+  detailsToggleButton.setAttribute("aria-expanded", isOpen ? "true" : "false");
+  detailsToggleButton.textContent = isOpen ? "Hide Details" : "Clips & Files";
+  detailsDrawerBackdrop.hidden = !isOpen;
+}
+
+function isDetailsDrawerOpen(): boolean {
+  return detailsDrawer.classList.contains("is-open");
+}
+
+function toggleDetailsDrawer(): void {
+  setDetailsDrawerOpen(!isDetailsDrawerOpen());
+}
+
 function getCaptionPreview(text: string): string {
   return text.length <= 120 ? text : `${text.slice(0, 117).trimEnd()}...`;
 }
@@ -1737,6 +1757,19 @@ showLogButton.addEventListener("click", () => {
   toggleLogDrawer();
 });
 
+detailsToggleButton.addEventListener("click", () => {
+  toggleDetailsDrawer();
+});
+
+closeDetailsButton.addEventListener("click", () => {
+  setDetailsDrawerOpen(false);
+  detailsToggleButton.focus();
+});
+
+detailsDrawerBackdrop.addEventListener("click", () => {
+  setDetailsDrawerOpen(false);
+});
+
 closeLogButton.addEventListener("click", () => {
   closeLogDrawer();
 });
@@ -1796,6 +1829,12 @@ document.addEventListener("keydown", (event) => {
 
   if (isLogDrawerOpen()) {
     closeLogDrawer();
+    event.preventDefault();
+    return;
+  }
+
+  if (isDetailsDrawerOpen()) {
+    setDetailsDrawerOpen(false);
     event.preventDefault();
     return;
   }
