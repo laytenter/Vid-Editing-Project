@@ -114,6 +114,7 @@ h2 {
 
 .hero {
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -172,7 +173,7 @@ h2 {
 
 .header-details-button,
 .header-log-button {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   min-height: 30px;
   padding: 5px 10px;
   border-color: var(--border-soft);
@@ -426,9 +427,10 @@ button {
   font: inherit;
   font-size: 0.84rem;
   font-weight: 700;
-  line-height: 1;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
   text-align: center;
-  white-space: nowrap;
+  white-space: normal;
   transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, transform 120ms ease;
 }
 
@@ -1419,6 +1421,49 @@ pre {
   }
 }
 
+@media (max-width: 980px) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .controls-column {
+    grid-template-columns: minmax(250px, 1.1fr) minmax(220px, 0.9fr);
+    grid-template-rows: auto auto;
+    align-items: stretch;
+  }
+
+  .source-panel {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+  }
+
+  .action-status-panel,
+  .clip-card {
+    grid-column: 2;
+  }
+
+  .main-column {
+    grid-template-rows: minmax(140px, 0.5fr) minmax(240px, 1fr);
+  }
+
+  .source-actions {
+    gap: 7px;
+  }
+
+  .source-action-buttons {
+    grid-template-columns: repeat(2, minmax(7.5rem, 1fr));
+  }
+
+  .clip-card .actions {
+    grid-template-columns: repeat(2, minmax(8rem, 1fr));
+  }
+
+  .details-drawer {
+    width: min(390px, calc(100% - 14px));
+  }
+}
+
 @media (max-width: 860px) {
   .app-shell {
     gap: 8px;
@@ -1426,13 +1471,18 @@ pre {
   }
 
   .workspace {
-    grid-template-columns: minmax(178px, 0.72fr) minmax(280px, 1.35fr);
-    grid-template-rows: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
     gap: 8px;
   }
 
   .workspace-column {
     gap: 8px;
+  }
+
+  .controls-column {
+    grid-template-columns: minmax(0, 1fr) minmax(210px, 0.68fr);
+    grid-template-rows: auto auto;
   }
 
   .app-logo {
@@ -1484,9 +1534,13 @@ pre {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .source-action-buttons {
+    grid-template-columns: repeat(2, minmax(6.8rem, 1fr));
+  }
+
   .source-actions button {
     min-height: 32px;
-    padding: 5px 6px;
+    padding: 6px 7px;
     font-size: 0.72rem;
   }
 
@@ -1500,7 +1554,7 @@ pre {
 
   .clip-card .actions {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: repeat(2, minmax(7.2rem, 1fr));
   }
 
   .clip-card > .path-row:first-child {
@@ -1509,6 +1563,14 @@ pre {
 
   #clipAddRangeBtn {
     grid-column: 1 / -1;
+  }
+
+  .caption-segments-header-actions {
+    justify-content: flex-start;
+  }
+
+  .caption-export-actions {
+    flex: 1 1 11rem;
   }
 
   #dropZone {
@@ -1559,12 +1621,59 @@ pre {
   }
 
   .controls-column {
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto auto auto;
+  }
+
+  .source-panel,
+  .action-status-panel,
+  .clip-card {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .source-action-buttons,
+  .clip-card .actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .clip-card .actions select,
+  .clip-card .actions button {
+    grid-column: 1;
   }
 
   .details-drawer {
     width: min(360px, calc(100% - 12px));
     min-width: min(300px, calc(100% - 12px));
+  }
+}
+
+@media (max-width: 560px) {
+  .app-header {
+    flex-wrap: wrap;
+  }
+
+  .hero-copy {
+    flex: 1 1 100%;
+  }
+
+  .header-details-button,
+  .header-log-button {
+    flex: 1 1 8rem;
+  }
+
+  .caption-segments-header-actions,
+  .caption-export-actions,
+  .queued-clips-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+  }
+
+  .caption-save-button,
+  .caption-clear-selection,
+  .queued-clips-actions button {
+    width: 100%;
   }
 }
 
