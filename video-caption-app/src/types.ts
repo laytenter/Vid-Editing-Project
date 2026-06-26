@@ -5,7 +5,7 @@
 }
 
 export interface PersistedSettings {
-  themeMode: "system" | "dark" | "light";
+  themeMode: "system" | "dark" | "light" | "retro";
 }
 
 export type AudioSourceKind = "uploaded" | "extracted" | null;

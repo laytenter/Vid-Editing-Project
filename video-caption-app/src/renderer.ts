@@ -5,7 +5,7 @@
 
 type AudioSourceKind = "uploaded" | "extracted" | null;
 type ClipMode = "copy" | "encode";
-type ThemeMode = "system" | "dark" | "light";
+type ThemeMode = "system" | "dark" | "light" | "retro";
 
 function mustGet<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);

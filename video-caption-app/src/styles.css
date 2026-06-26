@@ -47,6 +47,39 @@
   --drop-active-background: #d9eee6;
 }
 
+:root[data-theme="retro"] {
+  color-scheme: light;
+  --page-background: #d4d0c8;
+  --text: #111111;
+  --text-strong: #000000;
+  --muted: #404040;
+  --muted-subtle: #5d5d5d;
+  --surface: #ece9d8;
+  --surface-elevated: #f3f0df;
+  --surface-soft: #ddd9c8;
+  --surface-range: #d7e4ef;
+  --surface-selected: #c6d9ef;
+  --source-background: #ece9d8;
+  --border: #9b9888;
+  --border-soft: #7f7c6d;
+  --border-range: #316ac5;
+  --primary: #003399;
+  --primary-strong: #245edb;
+  --primary-button: #0a246a;
+  --primary-contrast: #ffffff;
+  --input-background: #ffffff;
+  --input-text: #111111;
+  --progress-track: #c8c4b3;
+  --log-background: #000000;
+  --log-text: #00ff66;
+  --drop-background: #e7e3d2;
+  --drop-active-background: #c6d9ef;
+}
+
+:root[data-theme="retro"] body {
+  font-family: Tahoma, "MS Sans Serif", "Segoe UI", Arial, sans-serif;
+}
+
 :root[data-theme="dark"] {
   color-scheme: dark;
   --page-background: linear-gradient(180deg, #111614 0, #171c1d 230px);

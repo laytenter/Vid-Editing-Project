@@ -272,10 +272,13 @@ function getUniqueFilePath(directory: string, baseName: string, extension: strin
   return candidatePath;
 }
 
+function isThemeMode(value: unknown): value is PersistedSettings["themeMode"] {
+  return value === "system" || value === "dark" || value === "light" || value === "retro";
+}
+
 function getPersistedSettings(): PersistedSettings {
   const themeModeValue = settingsStore.get("themeMode");
-  const themeMode =
-    themeModeValue === "dark" || themeModeValue === "light" || themeModeValue === "system" ? themeModeValue : "system";
+  const themeMode = isThemeMode(themeModeValue) ? themeModeValue : "system";
 
   return {
     themeMode
@@ -290,7 +293,7 @@ function getAppSettings(): AppSettings {
 }
 
 function updatePersistedSettings(partial: Partial<PersistedSettings>): PersistedSettings {
-  if (partial.themeMode === "system" || partial.themeMode === "dark" || partial.themeMode === "light") {
+  if (isThemeMode(partial.themeMode)) {
     settingsStore.set("themeMode", partial.themeMode);
   }
 
@@ -584,6 +587,12 @@ function createApplicationMenu(): void {
               type: "radio",
               checked: settings.themeMode === "light",
               click: () => setThemeModeFromMenu("light")
+            },
+            {
+              label: "Retro Classic",
+              type: "radio",
+              checked: settings.themeMode === "retro",
+              click: () => setThemeModeFromMenu("retro")
             }
           ]
         }
