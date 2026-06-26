@@ -1,4 +1,4 @@
-ï»¿type AppSettings = {
+type AppSettings = {
   themeMode: ThemeMode;
   documentsDir: string;
 };
@@ -6,6 +6,8 @@
 type AudioSourceKind = "uploaded" | "extracted" | null;
 type ClipMode = "copy" | "encode";
 type ThemeMode = "system" | "dark" | "light" | "retro";
+type WorkflowSection = "source" | "process" | "clip" | "captions";
+type WorkflowNavTarget = WorkflowSection | "details" | "log";
 
 function mustGet<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -68,6 +70,7 @@ const clipAddRangeButton = mustGet<HTMLButtonElement>("clipAddRangeBtn");
 const queuedClipsCountNode = mustGet<HTMLElement>("queuedClipsCount");
 const queuedClipsListNode = mustGet<HTMLElement>("queuedClipsList");
 const queuedClipsExportButton = mustGet<HTMLButtonElement>("queuedClipsExportBtn");
+const workflowNavButtons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-workflow-target]"));
 
 let selectedVideoPath: string | null = null;
 let audioPath: string | null = null;
@@ -77,6 +80,7 @@ let audioSourceKind: AudioSourceKind = null;
 let isBusy = false;
 let isCancelling = false;
 let currentThemeMode: ThemeMode = "system";
+let currentWorkflowSection: WorkflowSection = "captions";
 let logDrawerWidth = 460;
 
 const allowedVideoExtensions = new Set(["mp4", "mov", "mkv", "avi", "webm", "m4v"]);
@@ -716,13 +720,13 @@ function renderCaptionSelectionSummary(): void {
     detailNode.textContent = "Click a caption to choose the start.";
   } else if (!captionRangeComplete || !focusSegment) {
     captionSelectionSummaryNode.dataset.state = "pending";
-    titleNode.textContent = "Start selected â€” click another caption to choose the end.";
-    detailNode.textContent = `${anchorSegment.start} â€” ${getShortCaptionPreview(anchorSegment.text)}`;
+    titleNode.textContent = "Start selected — click another caption to choose the end.";
+    detailNode.textContent = `${anchorSegment.start} — ${getShortCaptionPreview(anchorSegment.text)}`;
   } else {
     const startSegment = anchorSegment.index <= focusSegment.index ? anchorSegment : focusSegment;
     const endSegment = anchorSegment.index <= focusSegment.index ? focusSegment : anchorSegment;
     captionSelectionSummaryNode.dataset.state = "complete";
-    titleNode.textContent = `Selected range: ${startSegment.start} â†’ ${endSegment.end}`;
+    titleNode.textContent = `Selected range: ${startSegment.start} ? ${endSegment.end}`;
     detailNode.textContent = `${getShortCaptionPreview(startSegment.text)} / ${getShortCaptionPreview(endSegment.text)}`;
   }
 
@@ -919,12 +923,82 @@ function setLogDrawerWidth(width: number): void {
   document.documentElement.style.setProperty("--log-drawer-width", `${Math.round(nextWidth)}px`);
 }
 
+function getWorkflowNavTarget(button: HTMLButtonElement): WorkflowNavTarget | null {
+  const target = button.dataset.workflowTarget;
+  if (
+    target === "source" ||
+    target === "process" ||
+    target === "clip" ||
+    target === "captions" ||
+    target === "details" ||
+    target === "log"
+  ) {
+    return target;
+  }
+
+  return null;
+}
+
+function updateWorkflowNavigationState(): void {
+  document.documentElement.dataset.workflowSection = currentWorkflowSection;
+  const activeTarget: WorkflowNavTarget = isLogDrawerOpen()
+    ? "log"
+    : isDetailsDrawerOpen()
+      ? "details"
+      : currentWorkflowSection;
+
+  for (const button of workflowNavButtons) {
+    const target = getWorkflowNavTarget(button);
+    const isActive = target === activeTarget;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  }
+}
+
+function setWorkflowSection(section: WorkflowSection): void {
+  currentWorkflowSection = section;
+  document.documentElement.dataset.workflowSection = section;
+
+  if (isDetailsDrawerOpen()) {
+    setDetailsDrawerOpen(false);
+  }
+
+  if (isLogDrawerOpen()) {
+    closeLogDrawer();
+  }
+
+  updateWorkflowNavigationState();
+}
+
+function activateWorkflowNavTarget(target: WorkflowNavTarget): void {
+  if (target === "details") {
+    if (isLogDrawerOpen()) {
+      closeLogDrawer();
+    }
+    setDetailsDrawerOpen(true);
+    updateWorkflowNavigationState();
+    return;
+  }
+
+  if (target === "log") {
+    if (isDetailsDrawerOpen()) {
+      setDetailsDrawerOpen(false);
+    }
+    openLogDrawer();
+    updateWorkflowNavigationState();
+    return;
+  }
+
+  setWorkflowSection(target);
+}
+
 function openLogDrawer(): void {
   logDrawer.classList.add("is-open");
   logDrawer.setAttribute("aria-hidden", "false");
   logDrawerBackdrop.hidden = false;
   showLogButton.textContent = "Hide Log";
   scheduleLogPanelRender();
+  updateWorkflowNavigationState();
 }
 
 function closeLogDrawer(): void {
@@ -932,6 +1006,7 @@ function closeLogDrawer(): void {
   logDrawer.setAttribute("aria-hidden", "true");
   logDrawerBackdrop.hidden = true;
   showLogButton.textContent = "Show Log";
+  updateWorkflowNavigationState();
 }
 
 function isLogDrawerOpen(): boolean {
@@ -953,6 +1028,7 @@ function setDetailsDrawerOpen(isOpen: boolean): void {
   detailsToggleButton.setAttribute("aria-expanded", isOpen ? "true" : "false");
   detailsToggleButton.textContent = isOpen ? "Hide Details" : "Clips & Files";
   detailsDrawerBackdrop.hidden = !isOpen;
+  updateWorkflowNavigationState();
 }
 
 function isDetailsDrawerOpen(): boolean {
@@ -1069,7 +1145,7 @@ function renderCaptionSegments(): void {
   if (visibleSegments.length === 0) {
     appendCaptionEmptyState(
       "No matching captions",
-      `No captions match â€œ${searchQuery}â€. Clear or change the search to show the hidden captions.`
+      `No captions match “${searchQuery}”. Clear or change the search to show the hidden captions.`
     );
     renderCaptionSelectionSummary();
     return;
@@ -1761,6 +1837,15 @@ detailsToggleButton.addEventListener("click", () => {
   toggleDetailsDrawer();
 });
 
+for (const button of workflowNavButtons) {
+  button.addEventListener("click", () => {
+    const target = getWorkflowNavTarget(button);
+    if (target) {
+      activateWorkflowNavTarget(target);
+    }
+  });
+}
+
 closeDetailsButton.addEventListener("click", () => {
   setDetailsDrawerOpen(false);
   detailsToggleButton.focus();
@@ -2315,6 +2400,7 @@ async function initSettings(): Promise<void> {
 setIdleActionStatus();
 applyThemeMode("system");
 setLogDrawerWidth(logDrawerWidth);
+updateWorkflowNavigationState();
 refreshPaths();
 renderCaptionSegments();
 renderQueuedClips();

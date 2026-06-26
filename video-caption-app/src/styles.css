@@ -1818,3 +1818,107 @@ pre {
     padding: 8px;
   }
 }
+.workflow-nav {
+  display: none;
+}
+
+.workflow-nav-button {
+  flex: 1 1 6rem;
+  min-height: 30px;
+  padding: 6px 10px;
+  border-color: var(--border-soft);
+  background: var(--surface);
+  box-shadow: none;
+  color: var(--primary);
+  font-size: 0.78rem;
+}
+
+.workflow-nav-button:hover:not(:disabled) {
+  border-color: var(--primary-strong);
+  background: var(--surface-soft);
+  box-shadow: var(--row-shadow);
+  color: var(--primary);
+}
+
+.workflow-nav-button.is-active,
+.workflow-nav-button[aria-pressed="true"] {
+  border-color: var(--primary-strong);
+  background: var(--surface-selected);
+  box-shadow: var(--row-shadow);
+  color: var(--text-strong);
+}
+
+@media (max-width: 980px) {
+  .app-shell {
+    grid-template-rows: auto auto minmax(0, 1fr);
+  }
+
+  .workflow-nav {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    overflow-x: auto;
+    padding: 3px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-panel);
+    background: var(--surface-elevated);
+    box-shadow: var(--panel-shadow);
+  }
+
+  .workflow-nav-button {
+    white-space: nowrap;
+  }
+
+  .controls-column {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+    align-items: stretch;
+  }
+
+  .controls-column .source-panel,
+  .controls-column .action-status-panel,
+  .controls-column .clip-card {
+    display: none;
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  :root[data-workflow-section="source"] .source-panel,
+  :root[data-workflow-section="process"] .source-panel,
+  :root[data-workflow-section="process"] .action-status-panel,
+  :root[data-workflow-section="clip"] .clip-card,
+  .action-status-panel:not([data-state="idle"]) {
+    display: grid;
+  }
+
+  :root[data-workflow-section="source"] .source-action-group[data-workflow-panel="process"],
+  :root[data-workflow-section="source"] .source-save-button,
+  :root[data-workflow-section="process"] #dropZone,
+  :root[data-workflow-section="process"] .source-action-group[data-workflow-panel="source"] {
+    display: none;
+  }
+
+  :root[data-workflow-section="source"] .source-panel,
+  :root[data-workflow-section="process"] .source-panel,
+  :root[data-workflow-section="clip"] .clip-card {
+    max-height: 32vh;
+    overflow: auto;
+  }
+
+  .main-column {
+    grid-template-rows: minmax(145px, 0.45fr) minmax(260px, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .workflow-nav {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .workflow-nav-button {
+    width: 100%;
+  }
+}

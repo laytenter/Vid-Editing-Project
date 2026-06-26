@@ -23,10 +23,17 @@
     <button id="detailsToggleButton" class="header-details-button" type="button" aria-controls="detailsDrawer" aria-expanded="false">Clips & Files</button>
     <button id="showLogButton" class="header-log-button" type="button">Show Log</button>
   </header>
-
+  <nav id="workflowNav" class="workflow-nav" aria-label="Workflow sections">
+    <button class="workflow-nav-button" type="button" data-workflow-target="source" aria-pressed="false">Source</button>
+    <button class="workflow-nav-button" type="button" data-workflow-target="process" aria-pressed="false">Process</button>
+    <button class="workflow-nav-button" type="button" data-workflow-target="clip" aria-pressed="false">Clip</button>
+    <button class="workflow-nav-button" type="button" data-workflow-target="captions" aria-pressed="true">Captions</button>
+    <button class="workflow-nav-button" type="button" data-workflow-target="details" aria-pressed="false" aria-controls="detailsDrawer">Details</button>
+    <button class="workflow-nav-button" type="button" data-workflow-target="log" aria-pressed="false" aria-controls="logDrawer">Log</button>
+  </nav>
   <main class="workspace" aria-label="Video caption workspace">
   <div class="workspace-column controls-column">
-  <section class="source-panel workspace-card">
+  <section id="sourcePanel" class="source-panel workspace-card">
     <div class="section-header">
       <div>
         <p class="eyebrow section-eyebrow">Media Source</p>
@@ -39,23 +46,23 @@
       <strong id="sessionNoticeTitle">Previous project restored</strong>
       <span id="sessionNoticeDetail"></span>
     </div>
-    <div id="dropZone">Drop video or audio here</div>
+    <div id="dropZone" data-workflow-panel="source">Drop video or audio here</div>
     <div class="actions source-actions">
-      <div class="source-action-group">
+      <div class="source-action-group" data-workflow-panel="source">
         <span class="source-action-label">1. Select source</span>
         <div class="source-action-buttons">
           <button id="selectVideoButton">Upload Video</button>
           <button id="selectAudioButton">Upload Audio</button>
         </div>
       </div>
-      <div class="source-action-group">
+      <div class="source-action-group" data-workflow-panel="process">
         <span class="source-action-label">2. Process source</span>
         <div class="source-action-buttons">
           <button id="extractAudioButton" disabled>Extract Audio</button>
           <button id="generateCaptionsButton" disabled>Generate Captions</button>
         </div>
       </div>
-      <button id="saveAudioButton" class="secondary-button source-save-button" disabled>Save extracted audio</button>
+      <button id="saveAudioButton" class="secondary-button source-save-button" data-workflow-panel="process" disabled>Save extracted audio</button>
     </div>
   </section>
 
@@ -75,7 +82,7 @@
     </div>
   </section>
 
-  <section class="paths workspace-card clip-card">
+  <section id="clipPanel" class="paths workspace-card clip-card">
     <div class="path-row"><span class="label">Clip Video</span></div>
     <div class="actions">
       <input id="clipStart" aria-label="Clip start time" title="Clip start time" placeholder="HH:MM:SS.mmm" />
@@ -92,7 +99,7 @@
   </div>
 
   <div class="workspace-column main-column">
-  <section class="paths preview-panel workspace-card preview-card">
+  <section id="previewPanel" class="paths preview-panel workspace-card preview-card">
     <div class="path-row">
       <span class="label">Preview</span>
       <span id="previewStatus" class="preview-status">No media selected</span>
@@ -102,7 +109,7 @@
     <p id="previewEmpty" class="preview-empty">Select video or audio to preview.</p>
   </section>
 
-  <section class="paths workspace-card captions-card">
+  <section id="captionsPanel" class="paths workspace-card captions-card">
     <div class="caption-segments-header">
       <span class="label">Caption Segments</span>
       <div class="caption-segments-header-actions">
