@@ -4,15 +4,15 @@ Local-first Electron desktop app for generating captions, reviewing transcript s
 
 The app lives in [`video-caption-app/`](video-caption-app/). For full setup, architecture, and usage details, see [`video-caption-app/README.md`](video-caption-app/README.md).
 
-## Runtime Prerequisites
+## Verified runtime prerequisites
 
-Before `npm start` can work, `ffmpeg.exe`, `ffprobe.exe`, and `whisper.exe` must already be present in `video-caption-app/bin/`. The setup script creates the local runtime folders and downloads the required `ggml-base.en.bin` Whisper model, but it does not download these runtime executables.
+The repository does not track native executables or DLLs. The Windows setup script downloads pinned FFmpeg 8.1.1, whisper.cpp 1.8.3, and the pinned `ggml-base.en.bin` model from documented upstream releases. It verifies each archive and installed runtime file with the SHA-256 values in [`video-caption-app/runtime-dependencies.json`](video-caption-app/runtime-dependencies.json) before the app can execute them.
 
 ## Quick Start
 
 ```powershell
 cd video-caption-app
-npm install
+npm ci
 .\scripts\setup-windows.ps1
 npm start
 ```
@@ -29,3 +29,5 @@ npm start
 Caption and extracted-audio saves use a save dialog. Clips are exported automatically beside the selected video. All media processing stays local.
 
 Active FFmpeg or Whisper work can be cancelled from the compact Activity panel. The most recent caption project is restored automatically after restarting the app.
+
+See [SECURITY.md](SECURITY.md) for private vulnerability reporting and [`video-caption-app/docs/native-runtime.md`](video-caption-app/docs/native-runtime.md) for native dependency provenance and the audit of the binaries formerly tracked in Git.

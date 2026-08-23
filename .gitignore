@@ -3,9 +3,8 @@ dist/
 .tmp-ts-test/
 .tmp-test/
 .runtime-staging/
-video-caption-app/bin/ffmpeg.exe
-video-caption-app/bin/ffprobe.exe
-video-caption-app/bin/*.previous.exe
+video-caption-app/bin/*
+!video-caption-app/bin/.gitkeep
 *.log
 .DS_Store
 Thumbs.db

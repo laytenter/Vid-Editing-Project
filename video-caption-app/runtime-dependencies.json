@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "components": {
+    "ffmpeg": {
+      "version": "8.1.1",
+      "publisher": "GyanD/codexffmpeg",
+      "upstreamSource": "FFmpeg/FFmpeg@239f2c733d",
+      "archive": {
+        "url": "https://github.com/GyanD/codexffmpeg/releases/download/8.1.1/ffmpeg-8.1.1-essentials_build.zip",
+        "sha256": "6f58ce889f59c311410f7d2b18895b33c03456463486f3b1ebc93d97a0f54541"
+      },
+      "files": {
+        "ffmpeg.exe": {
+          "archiveName": "ffmpeg.exe",
+          "sha256": "228d7a8556258de907fdb55f36850078ebc7680b84ec30d84ea02e99bec1d1eb"
+        }
+      }
+    },
+    "whisper": {
+      "version": "1.8.3",
+      "publisher": "ggml-org/whisper.cpp",
+      "upstreamSource": "ggml-org/whisper.cpp@2eeeba5",
+      "archive": {
+        "url": "https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.3/whisper-bin-x64.zip",
+        "sha256": "d824b1e37599f882b396e73f1ee0bfd5d0529f700314c48311dcbd00b803321d"
+      },
+      "files": {
+        "whisper.exe": {
+          "archiveName": "whisper-cli.exe",
+          "sha256": "0ff971e410240a0b97117432d771245698f376e06105c011959d2bfc4bb23311"
+        },
+        "whisper.dll": {
+          "archiveName": "whisper.dll",
+          "sha256": "4037a6567fbb08fc7efda18e4d128a95df9c31ba171af20439d1a93b785d007e"
+        },
+        "ggml.dll": {
+          "archiveName": "ggml.dll",
+          "sha256": "bcfeaf6e5b59c315fc36e290715aa7a84b22461e968543c13dfcf57df7b1b81d"
+        },
+        "ggml-base.dll": {
+          "archiveName": "ggml-base.dll",
+          "sha256": "61c9c57f49f380896ed54ed3f71735e10a2d986f482c2b0a55e72b47f731b193"
+        },
+        "ggml-cpu.dll": {
+          "archiveName": "ggml-cpu.dll",
+          "sha256": "eb2f1d023e51c40b27463b5ab165600eb48cb60323740f400b1b62e1c8706c56"
+        }
+      }
+    },
+    "model": {
+      "name": "ggml-base.en.bin",
+      "publisher": "ggerganov/whisper.cpp",
+      "revision": "5359861c739e955e79d9a303bcbc70fb988958b1",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.en.bin",
+      "sha256": "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002"
+    }
+  }
+}

@@ -8,8 +8,10 @@
   SaveDialogReturnValue
 } from "electron";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { copyFileSync, createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import Store from "electron-store";
 import type {
   AppSettings,
@@ -30,7 +32,7 @@ if (typeof electronRuntime === "string") {
   console.error("[fatal] Ensure startup uses Electron as the launcher (for example: .\\node_modules\\.bin\\electron.cmd .) and ELECTRON_RUN_AS_NODE is not set.");
   process.exit(1);
 }
-const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require("electron") as typeof import("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, session, shell } = require("electron") as typeof import("electron");
 
 console.log("[startup] process.execPath:", process.execPath);
 console.log("[startup] process.argv:", process.argv);
@@ -44,6 +46,39 @@ type StreamName = ToolLogEntry["stream"];
 
 const APP_USER_MODEL_ID = "com.local.video-caption-app";
 const MEDIA_PROCESS_CANCELLED_MESSAGE = "Media process cancelled";
+const CONTENT_SECURITY_POLICY =
+  "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' file: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"]);
+const AUDIO_EXTENSIONS = new Set([".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma", ".aiff", ".aif"]);
+const REQUIRED_RUNTIME_FILES: Record<ToolName, readonly string[]> = {
+  ffmpeg: ["ffmpeg.exe"],
+  whisper: ["whisper.exe", "whisper.dll", "ggml.dll", "ggml-base.dll", "ggml-cpu.dll"]
+};
+
+interface RuntimeFileDefinition {
+  archiveName: string;
+  sha256: string;
+}
+
+interface RuntimeComponentDefinition {
+  version: string;
+  files: Record<string, RuntimeFileDefinition>;
+}
+
+interface RuntimeDependencyManifest {
+  schemaVersion: number;
+  components: {
+    ffmpeg: RuntimeComponentDefinition;
+    whisper: RuntimeComponentDefinition;
+    model: {
+      name: string;
+      sha256: string;
+    };
+  };
+}
+
+let runtimeDependencyManifest: RuntimeDependencyManifest | null = null;
+const knownFilePaths = new Set<string>();
 
 const settingsStore = new Store<PersistedSettings & { captionProject?: CaptionProjectSession }>({
   defaults: {
@@ -58,9 +93,93 @@ interface ActiveMediaRun {
 
 const activeMediaRuns = new Map<number, ActiveMediaRun>();
 
+function resolveRuntimeBaseDir(): string {
+  return app.isPackaged ? process.resourcesPath : app.getAppPath();
+}
+
 function resolveBinaryPath(binaryName: BinaryName): string {
-  const baseDir = app.isPackaged ? process.resourcesPath : app.getAppPath();
-  return path.resolve(baseDir, "bin", binaryName);
+  return path.resolve(resolveRuntimeBaseDir(), "bin", binaryName);
+}
+
+function getRuntimeDependencyManifest(): RuntimeDependencyManifest {
+  if (runtimeDependencyManifest) {
+    return runtimeDependencyManifest;
+  }
+
+  const manifestPath = path.resolve(resolveRuntimeBaseDir(), "runtime-dependencies.json");
+  if (!existsSync(manifestPath)) {
+    throw new Error(`Runtime dependency manifest not found: ${manifestPath}`);
+  }
+
+  const parsed = JSON.parse(readFileSync(manifestPath, "utf8")) as RuntimeDependencyManifest;
+  if (parsed.schemaVersion !== 1 || !parsed.components?.ffmpeg || !parsed.components?.whisper || !parsed.components?.model) {
+    throw new Error(`Runtime dependency manifest is invalid: ${manifestPath}`);
+  }
+
+  const isSha256 = (value: unknown): value is string => typeof value === "string" && /^[a-f0-9]{64}$/i.test(value);
+  for (const tool of ["ffmpeg", "whisper"] as const) {
+    const actualFileNames = Object.keys(parsed.components[tool].files).sort();
+    const requiredFileNames = [...REQUIRED_RUNTIME_FILES[tool]].sort();
+    if (
+      actualFileNames.length !== requiredFileNames.length ||
+      actualFileNames.some((fileName, index) => fileName !== requiredFileNames[index]) ||
+      actualFileNames.some((fileName) => !isSha256(parsed.components[tool].files[fileName]?.sha256))
+    ) {
+      throw new Error(`Runtime dependency manifest has an invalid ${tool} file allowlist: ${manifestPath}`);
+    }
+  }
+
+  if (!isSha256(parsed.components.model.sha256) || parsed.components.model.name !== "ggml-base.en.bin") {
+    throw new Error(`Runtime dependency manifest has an invalid model definition: ${manifestPath}`);
+  }
+
+  runtimeDependencyManifest = parsed;
+  return parsed;
+}
+
+function getPathKey(filePath: string): string {
+  const resolved = path.resolve(filePath);
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+function rememberFilePath(filePath: string): string {
+  const resolved = path.resolve(filePath);
+  knownFilePaths.add(getPathKey(resolved));
+  return resolved;
+}
+
+function isKnownFilePath(input: unknown): input is string {
+  return typeof input === "string" && input.trim() !== "" && knownFilePaths.has(getPathKey(input));
+}
+
+function sha256File(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = createHash("sha256");
+    const stream = createReadStream(filePath);
+    stream.on("error", reject);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("end", () => resolve(hash.digest("hex")));
+  });
+}
+
+async function verifyFileIntegrity(filePath: string, expectedSha256: string, label: string): Promise<void> {
+  if (!existsSync(filePath)) {
+    throw new Error(`${label} not found: ${filePath}`);
+  }
+
+  const actualSha256 = await sha256File(filePath);
+  if (actualSha256 !== expectedSha256.toLowerCase()) {
+    throw new Error(
+      `${label} failed SHA-256 integrity verification. Expected ${expectedSha256.toLowerCase()} but received ${actualSha256}. Re-run scripts/setup-windows.ps1.`
+    );
+  }
+}
+
+async function verifyRuntimeComponent(tool: ToolName): Promise<void> {
+  const component = getRuntimeDependencyManifest().components[tool];
+  for (const [fileName, definition] of Object.entries(component.files)) {
+    await verifyFileIntegrity(path.resolve(resolveRuntimeBaseDir(), "bin", fileName), definition.sha256, `${tool}/${fileName}`);
+  }
 }
 
 function resolveAppIconPath(): string {
@@ -75,7 +194,7 @@ function resolveTempDir(): string {
 
 function resolveModelPath(): string {
   const modelDir = path.resolve(app.getPath("userData"), "models");
-  return path.resolve(modelDir, "ggml-base.en.bin");
+  return path.resolve(modelDir, getRuntimeDependencyManifest().components.model.name);
 }
 
 function normalizeExistingFile(input: unknown, label: string): string {
@@ -90,6 +209,50 @@ function normalizeExistingFile(input: unknown, label: string): string {
   }
 
   return resolved;
+}
+
+function normalizeKnownExistingFile(input: unknown, label: string): string {
+  const resolved = normalizeExistingFile(input, label);
+  if (!isKnownFilePath(resolved)) {
+    throw new Error(`${label} is not a file selected or generated by this application`);
+  }
+
+  return resolved;
+}
+
+function normalizeSupportedMediaFile(input: unknown, label: string): string {
+  const resolved = normalizeExistingFile(input, label);
+  const extension = path.extname(resolved).toLowerCase();
+  if (!VIDEO_EXTENSIONS.has(extension) && !AUDIO_EXTENSIONS.has(extension)) {
+    throw new Error(`${label} is not a supported video or audio file`);
+  }
+
+  return resolved;
+}
+
+function normalizeClipOutputPath(input: unknown, videoPath: string): string {
+  if (typeof input !== "string" || input.trim() === "") {
+    throw new Error("outputPath must be a non-empty string");
+  }
+
+  const outputPath = path.resolve(input);
+  const videoDirectory = path.dirname(videoPath);
+  const expectedPrefix = `${getSafeBaseName(videoPath)}_clip_`;
+  const outputName = path.basename(outputPath);
+
+  if (getPathKey(path.dirname(outputPath)) !== getPathKey(videoDirectory)) {
+    throw new Error("outputPath must be beside the selected video");
+  }
+
+  if (path.extname(outputPath).toLowerCase() !== ".mp4" || !outputName.toLowerCase().startsWith(expectedPrefix.toLowerCase())) {
+    throw new Error(`outputPath must be an MP4 named with the ${expectedPrefix} prefix`);
+  }
+
+  if (getPathKey(outputPath) === getPathKey(videoPath)) {
+    throw new Error("outputPath must not replace the selected video");
+  }
+
+  return outputPath;
 }
 
 function getSafeBaseName(filePath: string): string {
@@ -138,7 +301,61 @@ function getCaptionProjectSession(): CaptionProjectSession | null {
   return settingsStore.get("captionProject") ?? null;
 }
 
-function setCaptionProjectSession(session: CaptionProjectSession): void {
+function getCaptionProjectPaths(session: CaptionProjectSession): string[] {
+  const queuedClipPaths = Array.isArray(session.queuedClips)
+    ? session.queuedClips.flatMap((clip) =>
+        clip && typeof clip === "object" && typeof clip.videoPath === "string" ? [clip.videoPath] : []
+      )
+    : [];
+
+  return [
+    session.selectedVideoPath,
+    session.audioPath,
+    session.srtPath,
+    session.vttPath,
+    ...queuedClipPaths
+  ].filter((filePath): filePath is string => typeof filePath === "string" && filePath.trim() !== "");
+}
+
+function rememberPersistedCaptionProjectPaths(): void {
+  const session = getCaptionProjectSession();
+  if (!session || session.version !== 1) {
+    return;
+  }
+
+  for (const filePath of getCaptionProjectPaths(session)) {
+    if (existsSync(path.resolve(filePath))) {
+      rememberFilePath(filePath);
+    }
+  }
+}
+
+function setCaptionProjectSession(input: unknown): void {
+  if (!input || typeof input !== "object" || (input as Partial<CaptionProjectSession>).version !== 1) {
+    throw new Error("caption project must be a version 1 session");
+  }
+
+  const session = input as CaptionProjectSession;
+  if (!Array.isArray(session.queuedClips) || !Array.isArray(session.captionSegments)) {
+    throw new Error("caption project arrays are invalid");
+  }
+
+  for (const filePath of [session.selectedVideoPath, session.audioPath, session.srtPath, session.vttPath]) {
+    if (filePath !== null && typeof filePath !== "string") {
+      throw new Error("caption project file paths must be strings or null");
+    }
+  }
+
+  if (session.queuedClips.some((clip) => !clip || typeof clip !== "object" || typeof clip.videoPath !== "string")) {
+    throw new Error("caption project queued clip paths are invalid");
+  }
+
+  for (const filePath of getCaptionProjectPaths(session)) {
+    if (!isKnownFilePath(filePath)) {
+      throw new Error("caption project contains a path that was not selected or generated by this application");
+    }
+  }
+
   settingsStore.set("captionProject", session);
 }
 
@@ -157,7 +374,7 @@ function setThemeModeFromMenu(themeMode: PersistedSettings["themeMode"]): void {
 }
 
 function resolveDefaultSaveDirectory(mediaPathInput?: string | null): string {
-  if (typeof mediaPathInput === "string" && mediaPathInput.trim() !== "") {
+  if (isKnownFilePath(mediaPathInput)) {
     const mediaDir = path.dirname(path.resolve(mediaPathInput));
     if (existsSync(mediaDir)) {
       return mediaDir;
@@ -211,6 +428,23 @@ function getOwnerWindowFromEvent(event: IpcMainInvokeEvent): BrowserWindowType |
   return BrowserWindow.fromWebContents(event.sender) ?? getPrimaryWindow();
 }
 
+function assertTrustedIpcSender(event: IpcMainInvokeEvent): void {
+  const expectedUrl = pathToFileURL(path.join(__dirname, "index.html")).href;
+  if (!event.senderFrame || event.senderFrame !== event.sender.mainFrame || event.senderFrame.url !== expectedUrl) {
+    throw new Error("Rejected IPC request from an untrusted renderer frame");
+  }
+}
+
+function registerIpcHandler<TArgs extends unknown[], TResult>(
+  channel: string,
+  listener: (event: IpcMainInvokeEvent, ...args: TArgs) => TResult | Promise<TResult>
+): void {
+  ipcMain.handle(channel, (event, ...args) => {
+    assertTrustedIpcSender(event);
+    return listener(event, ...(args as unknown as TArgs));
+  });
+}
+
 async function showOpenDialogForWindow(
   ownerWindow: BrowserWindowType | undefined,
   options: OpenDialogOptions
@@ -247,7 +481,12 @@ async function promptVideoSelection(ownerWindow?: BrowserWindowType): Promise<st
     return null;
   }
 
-  return path.resolve(result.filePaths[0]);
+  const selectedPath = normalizeSupportedMediaFile(result.filePaths[0], "selected video");
+  if (!VIDEO_EXTENSIONS.has(path.extname(selectedPath).toLowerCase())) {
+    throw new Error("The selected file is not a supported video");
+  }
+
+  return rememberFilePath(selectedPath);
 }
 
 async function promptAudioSelection(ownerWindow?: BrowserWindowType): Promise<string | null> {
@@ -264,7 +503,12 @@ async function promptAudioSelection(ownerWindow?: BrowserWindowType): Promise<st
     return null;
   }
 
-  return path.resolve(result.filePaths[0]);
+  const selectedPath = normalizeSupportedMediaFile(result.filePaths[0], "selected audio");
+  if (!AUDIO_EXTENSIONS.has(path.extname(selectedPath).toLowerCase())) {
+    throw new Error("The selected file is not a supported audio file");
+  }
+
+  return rememberFilePath(selectedPath);
 }
 
 function sendMenuOpenVideo(videoPath: string): void {
@@ -438,7 +682,7 @@ function cancelActiveMediaRun(senderId: number): boolean {
   return true;
 }
 
-function runTool(
+async function runTool(
   event: IpcMainInvokeEvent,
   run: ActiveMediaRun,
   tool: ToolName,
@@ -448,9 +692,8 @@ function runTool(
 ): Promise<void> {
   throwIfMediaRunCancelled(run);
 
-  if (!existsSync(binaryPath)) {
-    throw new Error(`Binary not found: ${binaryPath}`);
-  }
+  await verifyRuntimeComponent(tool);
+  throwIfMediaRunCancelled(run);
 
   return new Promise<void>((resolve, reject) => {
     const child = spawn(binaryPath, args, {
@@ -530,7 +773,7 @@ async function resolveWhisperAudioPath(event: IpcMainInvokeEvent, run: ActiveMed
   await runTool(event, run, "ffmpeg", resolveBinaryPath("ffmpeg.exe"), args, path.dirname(audioPath));
   throwIfMediaRunCancelled(run);
 
-  return convertedAudioPath;
+  return rememberFilePath(convertedAudioPath);
 }
 
 function createWindow(): void {
@@ -541,8 +784,16 @@ function createWindow(): void {
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false
     }
+  });
+
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  mainWindow.webContents.on("will-navigate", (event) => {
+    event.preventDefault();
   });
 
   void mainWindow.loadFile(path.join(__dirname, "index.html"));
@@ -553,14 +804,25 @@ if (process.platform === "win32") {
 }
 
 app.whenReady().then(() => {
+  rememberPersistedCaptionProjectPaths();
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        "Content-Security-Policy": [CONTENT_SECURITY_POLICY]
+      }
+    });
+  });
+  session.defaultSession.setPermissionCheckHandler(() => false);
+  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
   createWindow();
   createApplicationMenu();
 
-  ipcMain.handle("settings:get", async (): Promise<AppSettings> => {
+  registerIpcHandler("settings:get", async (): Promise<AppSettings> => {
     return getAppSettings();
   });
 
-  ipcMain.handle("settings:set", async (_event, partial: Partial<PersistedSettings>): Promise<AppSettings> => {
+  registerIpcHandler("settings:set", async (_event, partial: Partial<PersistedSettings>): Promise<AppSettings> => {
     updatePersistedSettings(partial ?? {});
     createApplicationMenu();
     const settings = getAppSettings();
@@ -568,47 +830,50 @@ app.whenReady().then(() => {
     return settings;
   });
 
-  ipcMain.handle("caption-project:get", async (): Promise<CaptionProjectSession | null> => {
+  registerIpcHandler("caption-project:get", async (): Promise<CaptionProjectSession | null> => {
     return getCaptionProjectSession();
   });
 
-  ipcMain.handle("caption-project:set", async (_event, session: CaptionProjectSession): Promise<void> => {
+  registerIpcHandler("caption-project:set", async (_event, session: CaptionProjectSession): Promise<void> => {
     setCaptionProjectSession(session);
   });
 
-  ipcMain.handle("media-process:cancel", async (event): Promise<boolean> => {
+  registerIpcHandler("media-process:cancel", async (event): Promise<boolean> => {
     return cancelActiveMediaRun(event.sender.id);
   });
 
-  ipcMain.handle("open-path", async (_event, targetPath: unknown): Promise<boolean> => {
-    if (typeof targetPath !== "string" || targetPath.trim() === "") {
-      throw new Error("open-path requires a non-empty path string");
-    }
-
-    const result = await shell.openPath(path.resolve(targetPath));
-    return result === "";
+  registerIpcHandler("known-path-exists", async (_event, targetPath: unknown): Promise<boolean> => {
+    return isKnownFilePath(targetPath) && existsSync(path.resolve(targetPath));
   });
 
-  ipcMain.handle("path-exists", async (_event, targetPath: unknown): Promise<boolean> => {
-    return typeof targetPath === "string" && targetPath.trim() !== "" && existsSync(path.resolve(targetPath));
-  });
-
-  ipcMain.handle("open-temp-folder", async (): Promise<boolean> => {
+  registerIpcHandler("open-temp-folder", async (): Promise<boolean> => {
     const result = await shell.openPath(resolveTempDir());
     return result === "";
   });
 
-  ipcMain.handle("select-video", async (event): Promise<string | null> => {
+  registerIpcHandler("select-video", async (event): Promise<string | null> => {
     return promptVideoSelection(getOwnerWindowFromEvent(event));
   });
 
-  ipcMain.handle("select-audio", async (event): Promise<string | null> => {
+  registerIpcHandler("select-audio", async (event): Promise<string | null> => {
     return promptAudioSelection(getOwnerWindowFromEvent(event));
   });
 
-  ipcMain.handle("extract-audio", async (event, videoPath: unknown): Promise<ExtractAudioResult> => {
+  registerIpcHandler("authorize-dropped-file", async (_event, droppedPath: unknown): Promise<string | null> => {
+    if (typeof droppedPath !== "string" || droppedPath.trim() === "") {
+      return null;
+    }
+
+    try {
+      return rememberFilePath(normalizeSupportedMediaFile(droppedPath, "dropped file"));
+    } catch {
+      return null;
+    }
+  });
+
+  registerIpcHandler("extract-audio", async (event, videoPath: unknown): Promise<ExtractAudioResult> => {
     return withMediaRun(event, async (run) => {
-      const resolvedVideoPath = normalizeExistingFile(videoPath, "videoPath");
+      const resolvedVideoPath = normalizeKnownExistingFile(videoPath, "videoPath");
       const tempDir = resolveTempDir();
       const audioPath = getUniqueFilePath(tempDir, `${getSafeBaseName(resolvedVideoPath)}_audio`, ".wav");
 
@@ -629,17 +894,16 @@ app.whenReady().then(() => {
       await runTool(event, run, "ffmpeg", resolveBinaryPath("ffmpeg.exe"), args, path.dirname(resolvedVideoPath));
       throwIfMediaRunCancelled(run);
 
-      return { audioPath };
+      return { audioPath: rememberFilePath(audioPath) };
     });
   });
 
   console.log("[main] clip-video handler registered");
-  ipcMain.handle("clip-video", async (event, request: ClipVideoRequest) => {
+  registerIpcHandler("clip-video", async (event, request: ClipVideoRequest) => {
     return withMediaRun(event, async (run) => {
-      const resolvedVideoPath = normalizeExistingFile(request?.videoPath, "videoPath");
+      const resolvedVideoPath = normalizeKnownExistingFile(request?.videoPath, "videoPath");
       const startTime = typeof request?.startTime === "string" ? request.startTime.trim() : "";
       const endTime = typeof request?.endTime === "string" ? request.endTime.trim() : "";
-      const outputPathInput = typeof request?.outputPath === "string" ? request.outputPath.trim() : "";
       const mode = request?.mode;
 
       if (startTime === "") {
@@ -650,19 +914,11 @@ app.whenReady().then(() => {
         throw new Error("endTime must be a non-empty string");
       }
 
-      if (outputPathInput === "") {
-        throw new Error("outputPath must be a non-empty string");
-      }
-
       if (mode !== "copy" && mode !== "encode") {
         throw new Error("mode must be 'copy' or 'encode'");
       }
 
-      const resolvedOutputPath = path.resolve(outputPathInput);
-      const outputDir = path.dirname(resolvedOutputPath);
-      if (!existsSync(outputDir)) {
-        mkdirSync(outputDir, { recursive: true });
-      }
+      const resolvedOutputPath = normalizeClipOutputPath(request?.outputPath, resolvedVideoPath);
 
       const args =
         mode === "copy"
@@ -692,16 +948,19 @@ app.whenReady().then(() => {
       throwIfMediaRunCancelled(run);
 
       return {
-        outputPath: resolvedOutputPath,
+        outputPath: rememberFilePath(resolvedOutputPath),
         mode
       };
     });
   });
 
-  ipcMain.handle("run-whisper", async (event, input: unknown): Promise<RunWhisperResult> => {
+  registerIpcHandler("run-whisper", async (event, input: unknown): Promise<RunWhisperResult> => {
     return withMediaRun(event, async (run) => {
       const request = normalizeRunWhisperRequest(input);
-      const audioPath = normalizeExistingFile(request.audioPath, "audioPath");
+      const audioPath = normalizeKnownExistingFile(request.audioPath, "audioPath");
+      if (request.sourcePath && !isKnownFilePath(request.sourcePath)) {
+        throw new Error("sourcePath is not a file selected or generated by this application");
+      }
 
       const tempDir = resolveTempDir();
       const outputBase = path.resolve(tempDir, "captions");
@@ -710,9 +969,11 @@ app.whenReady().then(() => {
 
       const modelPath = resolveModelPath();
 
-      if (!existsSync(modelPath)) {
-        throw new Error(`Model not found: ${modelPath}`);
-      }
+      await verifyFileIntegrity(
+        modelPath,
+        getRuntimeDependencyManifest().components.model.sha256,
+        `Whisper model ${path.basename(modelPath)}`
+      );
 
       const whisperAudioPath = await resolveWhisperAudioPath(event, run, audioPath);
       const args = ["-m", modelPath, "-f", whisperAudioPath, "-of", outputBase, "-osrt", "-ovtt"];
@@ -727,12 +988,17 @@ app.whenReady().then(() => {
       const srtText = readFileSync(tempSrtPath, "utf8");
       throwIfMediaRunCancelled(run);
 
-      return { srtPath: tempSrtPath, vttPath: tempVttPath, modelPath, srtText };
+      return {
+        srtPath: rememberFilePath(tempSrtPath),
+        vttPath: rememberFilePath(tempVttPath),
+        modelPath,
+        srtText
+      };
     });
   });
 
-  ipcMain.handle("save-file-as", async (event, request: SaveFileAsRequest): Promise<string | null> => {
-    const sourcePath = normalizeExistingFile(request?.sourcePath, "sourcePath");
+  registerIpcHandler("save-file-as", async (event, request: SaveFileAsRequest): Promise<string | null> => {
+    const sourcePath = normalizeKnownExistingFile(request?.sourcePath, "sourcePath");
     const sourceExt = path.extname(sourcePath).toLowerCase();
     const expectedExt = sourceExt === ".srt" || sourceExt === ".vtt" || sourceExt === ".wav" ? sourceExt : "";
 
@@ -767,10 +1033,10 @@ app.whenReady().then(() => {
     }
 
     copyFileSync(sourcePath, destinationPath);
-    return destinationPath;
+    return rememberFilePath(destinationPath);
   });
 
-  ipcMain.handle("save-text-as", async (event, request: SaveTextAsRequest): Promise<string | null> => {
+  registerIpcHandler("save-text-as", async (event, request: SaveTextAsRequest): Promise<string | null> => {
     if (typeof request?.content !== "string") {
       throw new Error("content must be a string");
     }
@@ -806,7 +1072,7 @@ app.whenReady().then(() => {
     }
 
     writeFileSync(destinationPath, request.content, "utf8");
-    return destinationPath;
+    return rememberFilePath(destinationPath);
   });
 
   app.on("activate", () => {

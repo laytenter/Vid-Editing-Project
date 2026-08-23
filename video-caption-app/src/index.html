@@ -3,6 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' file: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+  />
   <title>Video Caption App</title>
   <link rel="icon" type="image/svg+xml" href="./app-logo.svg" />
   <link rel="stylesheet" href="./styles.css" />
@@ -177,7 +181,7 @@
   </aside>
   </div>
 
-  <script>var exports = {}; var module = { exports: exports };</script>
+  <script src="./browser-globals.js"></script>
   <script src="./timestamp-utils.js"></script>
   <script src="./subtitle-utils.js"></script>
   <script src="./renderer.js"></script>

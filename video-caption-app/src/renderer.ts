@@ -1429,7 +1429,7 @@ async function restoreCaptionProject(): Promise<void> {
         return null;
       }
 
-      if (await window.videoTools.pathExists(savedPath)) {
+      if (await window.videoTools.knownPathExists(savedPath)) {
         return savedPath;
       }
 
@@ -1447,7 +1447,7 @@ async function restoreCaptionProject(): Promise<void> {
     const savedQueuedClips = Array.isArray(session.queuedClips) ? session.queuedClips : [];
     const restoredQueuedClips = await Promise.all(
       savedQueuedClips.map(async (clip): Promise<QueuedClip | null> => {
-        if (await window.videoTools.pathExists(clip.videoPath)) {
+        if (await window.videoTools.knownPathExists(clip.videoPath)) {
           return { ...clip };
         }
 
@@ -1551,24 +1551,14 @@ async function promptSaveExtractedAudio(): Promise<void> {
 }
 
 function appendSetupHintForMissingDependency(errorMessage: string): void {
-  const binaryPrefix = "Binary not found:";
-  const modelPrefix = "Model not found:";
+  const runtimeIssue = ["ffmpeg/", "whisper/", "Whisper model", "Runtime dependency manifest"].some((label) =>
+    errorMessage.includes(label)
+  );
 
-  if (errorMessage.includes(binaryPrefix)) {
-    const missingPath = errorMessage.slice(errorMessage.indexOf(binaryPrefix) + binaryPrefix.length).trim();
-    appendLog(`[setup] Missing binary: ${missingPath}`);
-    appendLog("[setup] Put ffmpeg.exe, ffprobe.exe, and whisper.exe in <project>\\bin\\.");
-    appendLog("[setup] FFmpeg downloads: https://www.gyan.dev/ffmpeg/builds/ or https://github.com/BtbN/FFmpeg-Builds/releases");
-    appendLog("[setup] whisper.cpp downloads: https://github.com/ggml-org/whisper.cpp/releases (extract CLI and rename to whisper.exe)");
-    return;
-  }
-
-  if (errorMessage.includes(modelPrefix)) {
-    const missingPath = errorMessage.slice(errorMessage.indexOf(modelPrefix) + modelPrefix.length).trim();
-    const modelDir = missingPath.replace(/\\[^\\]+$/, "");
-    appendLog(`[setup] Missing model: ${missingPath}`);
-    appendLog(`[setup] Place GGML model files in: ${modelDir}`);
-    appendLog("[setup] Model download: https://huggingface.co/ggerganov/whisper.cpp (e.g., ggml-base.en.bin)");
+  if (runtimeIssue) {
+    appendLog(`[setup] Runtime verification failed: ${errorMessage}`);
+    appendLog("[setup] From video-caption-app, run: .\\scripts\\setup-windows.ps1 -Force");
+    appendLog("[setup] Setup uses the pinned URLs and SHA-256 hashes in runtime-dependencies.json.");
   }
 }
 
@@ -1962,7 +1952,7 @@ dropZone.addEventListener("dragleave", (event) => {
   dropZone.classList.remove("drop-active");
 });
 
-dropZone.addEventListener("drop", (event) => {
+dropZone.addEventListener("drop", async (event) => {
   event.preventDefault();
   dropZone.classList.remove("drop-active");
 
@@ -1972,8 +1962,7 @@ dropZone.addEventListener("drop", (event) => {
     return;
   }
 
-  const droppedFile = files[0] as File & { path?: string };
-  const droppedPath = typeof droppedFile.path === "string" ? droppedFile.path.trim() : "";
+  const droppedPath = await window.videoTools.authorizeDroppedFile(files[0]);
 
   if (!droppedPath) {
     appendLog("Drop rejected: not a supported video or audio type");

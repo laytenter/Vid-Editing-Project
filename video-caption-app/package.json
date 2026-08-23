@@ -12,11 +12,14 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "electron-store": "^8.2.0"
+    "electron-store": "8.2.0"
   },
   "devDependencies": {
-    "@types/node": "^22.13.4",
-    "electron": "^40.4.1",
-    "typescript": "^5.8.2"
+    "@types/node": "22.19.11",
+    "electron": "43.4.1",
+    "typescript": "5.9.3"
+  },
+  "allowScripts": {
+    "electron@43.4.1": true
   }
 }

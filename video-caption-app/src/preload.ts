@@ -12,6 +12,7 @@ import type {
   SaveTextAsRequest,
   ToolLogEntry
 } from "./types";
+import { webUtils } from "electron";
 
 const videoToolsApi = {
   getSettings: (): Promise<AppSettings> => {
@@ -29,11 +30,8 @@ const videoToolsApi = {
   cancelActiveMediaProcess: (): Promise<boolean> => {
     return ipcRenderer.invoke("media-process:cancel");
   },
-  openPath: (targetPath: string): Promise<boolean> => {
-    return ipcRenderer.invoke("open-path", targetPath);
-  },
-  pathExists: (targetPath: string): Promise<boolean> => {
-    return ipcRenderer.invoke("path-exists", targetPath);
+  knownPathExists: (targetPath: string): Promise<boolean> => {
+    return ipcRenderer.invoke("known-path-exists", targetPath);
   },
   openTempFolder: (): Promise<boolean> => {
     return ipcRenderer.invoke("open-temp-folder");
@@ -43,6 +41,13 @@ const videoToolsApi = {
   },
   selectAudio: (): Promise<string | null> => {
     return ipcRenderer.invoke("select-audio");
+  },
+  authorizeDroppedFile: (file: File): Promise<string | null> => {
+    try {
+      return ipcRenderer.invoke("authorize-dropped-file", webUtils.getPathForFile(file));
+    } catch {
+      return Promise.resolve(null);
+    }
   },
   extractAudio: (videoPath: string): Promise<ExtractAudioResult> => {
     return ipcRenderer.invoke("extract-audio", videoPath);
