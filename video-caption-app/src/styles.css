@@ -364,6 +364,7 @@ h2 {
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 .session-notice[data-state="warning"] {
@@ -1033,6 +1034,7 @@ input[type="checkbox"] {
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
+  line-clamp: 3;
 }
 
 .queued-clip-remove {
@@ -1269,6 +1271,7 @@ input[type="checkbox"] {
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 4;
+  line-clamp: 4;
 }
 
 .caption-edited-dot {
@@ -1427,6 +1430,7 @@ pre {
 .is-resizing-log-drawer,
 .is-resizing-log-drawer * {
   cursor: ew-resize !important;
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -1489,6 +1493,7 @@ pre {
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 #dropZone.drop-active {
