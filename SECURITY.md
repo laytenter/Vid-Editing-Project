@@ -14,7 +14,7 @@ If private vulnerability reporting is unavailable, open a public issue containin
 
 ## Scope and security model
 
-The application processes media locally and executes pinned FFmpeg and whisper.cpp components. Native archives, installed executable files, required DLLs, and the Whisper model are SHA-256 verified against [`video-caption-app/runtime-dependencies.json`](video-caption-app/runtime-dependencies.json) before use. A digest proves byte identity with the documented upstream artifact; it is not a guarantee that upstream code is vulnerability-free.
+The application processes media locally and executes pinned FFmpeg and whisper.cpp components. Native archives, installed executable files, required DLLs, and the Whisper model are SHA-256 verified against [`runtime-dependencies.json`](runtime-dependencies.json) before use. A digest proves byte identity with the documented upstream artifact; it is not a guarantee that upstream code is vulnerability-free.
 
 Reports concerning renderer-to-main privilege escalation, unsafe media handling, native dependency substitution, model tampering, secret exposure, or dependency-chain compromise are in scope. Social engineering, denial of service requiring unrealistic resources, and findings that require an already-compromised operating-system administrator account are generally out of scope unless they cross a meaningful trust boundary.
 

@@ -27,6 +27,7 @@ if ($manifest.schemaVersion -ne 1) {
   throw "Unsupported runtime dependency manifest schema: $($manifest.schemaVersion)"
 }
 
+# Keep the established profile location when the app's display/package name changes.
 $modelsDir = Join-Path $appDataDir "video-caption-app\models"
 $modelPath = Join-Path $modelsDir $manifest.components.model.name
 

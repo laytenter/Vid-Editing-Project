@@ -2,6 +2,8 @@
 
 Updated 21 November 2026. The first single-track implementation is present. This document retains the roadmap, records the processing contract, and separates automated verification from remaining listening and accessibility acceptance.
 
+The app now runs from the **Vid-Editing-Project** repository root. This plan lives in `docs/audio-editor-plan.md`; all npm commands below run at the root. See [repository layout](repository-layout.md) for directory organization and saved-project compatibility.
+
 The implementation uses the existing Electron, TypeScript and verified FFmpeg stack. It includes the foundation and single-track features below, together with basic noise reduction and independent speed/pitch. Multiple-track placement remains later work.
 
 ## Confirmed direction

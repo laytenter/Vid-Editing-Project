@@ -1805,7 +1805,7 @@ function appendSetupHintForMissingDependency(errorMessage: string): void {
 
   if (runtimeIssue) {
     appendLog(`[setup] Runtime verification failed: ${errorMessage}`);
-    appendLog("[setup] From video-caption-app, run: .\\scripts\\setup-windows.ps1 -Force");
+    appendLog("[setup] From the repository root, run: .\\scripts\\setup-windows.ps1 -Force");
     appendLog("[setup] Setup uses the pinned URLs and SHA-256 hashes in runtime-dependencies.json.");
   }
 }

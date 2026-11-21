@@ -1,17 +1,24 @@
 {
-  "name": "video-caption-app",
+  "name": "vid-editing-project",
+  "productName": "Vid Editing",
+  "private": true,
   "version": "1.0.0",
-  "description": "Local video caption desktop app",
+  "description": "Local video and audio editing with captions, FFmpeg and Whisper",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/laytenter/Vid-Editing-Project.git"
+  },
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/copy-static.js && node scripts/check-browser-script-scope.js",
     "test": "tsc -p tsconfig.tests.json && node scripts/run-tests.js",
+    "test:native": "npm test && node .tmp-test/tests/audio-processing.native.test.js",
     "test:electron": "npm run build && node scripts/run-electron-smoke.js",
     "start": "npm run build && set ELECTRON_RUN_AS_NODE=&& .\\node_modules\\.bin\\electron.cmd ."
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "dependencies": {
     "electron-store": "8.2.0"
   },

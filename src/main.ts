@@ -42,6 +42,13 @@ if (typeof electronRuntime === "string") {
 }
 const { app, BrowserWindow, Menu, dialog, ipcMain, session, shell } = require("electron") as typeof import("electron");
 
+// Keep installed models, settings and saved edits at their existing location.
+// Preserve an explicit userData override, including isolated test profiles.
+const defaultUserDataPath = path.join(app.getPath("appData"), app.getName());
+if (getPathKey(app.getPath("userData")) === getPathKey(defaultUserDataPath)) {
+  app.setPath("userData", path.join(app.getPath("appData"), "video-caption-app"));
+}
+
 console.log("[startup] process.execPath:", process.execPath);
 console.log("[startup] process.argv:", process.argv);
 console.log("[startup] process.versions:", process.versions);
@@ -713,8 +720,8 @@ function createApplicationMenu(): void {
 
             await dialog.showMessageBox({
               type: "info",
-              title: "About Video Caption App",
-              message: "Video Caption App",
+              title: "About Vid Editing",
+              message: "Vid Editing",
               detail: details,
               buttons: ["OK"]
             });

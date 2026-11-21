@@ -63,6 +63,7 @@ app.on("browser-window-created", (_event, win) => {
   win.webContents.on("preload-error", (_event, _file, error) => rendererErrors.push(String(error)));
 });
 require(path.join(root, "dist", "main.js"));
+assert.equal(app.getPath("userData"), userData, "app naming must preserve an explicit isolated profile");
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function until(fn, label, timeout = 90000) {
@@ -98,8 +99,11 @@ const pass = (name) => console.log(`PASS Electron: ${name}`);
 async function screenshot(name, width=1280, height=900, theme="dark") {
   win.setSize(width,height);
   await js(`window.videoTools.setSettings({themeMode:${JSON.stringify(theme)}})`);
+  // Windows needs a composited surface; showing without focus preserves other apps.
+  win.showInactive();
   await delay(300);
   fs.writeFileSync(path.join(work, `${name}.png`), (await win.webContents.capturePage()).toPNG());
+  win.hide();
 }
 
 async function main() {
@@ -117,7 +121,11 @@ async function main() {
     assert.deepEqual(actual.captionSets, expected.captionSets);
     assert.equal(actual.captionSource, expected.captionSource);
     await field("audioPlayhead", "00:00:01.500");
-    assert.equal((await saved()).audioPlayhead, 1.5, "missing caption proxy must not block autosaving edits");
+    const playheadSession = await until(async () => {
+      const current = await saved();
+      return current.audioPlayhead === 1.5 ? current : false;
+    }, "playhead autosaved despite missing caption proxy");
+    assert.equal(playheadSession.audioPlayhead, 1.5, "missing caption proxy must not block autosaving edits");
     assert.equal(rendererErrors.length, 0, rendererErrors.join("\n"));
     pass("full application restart preserves edits and captions despite missing cached audio");
     openTarget = path.join(work, "video source.mkv");
@@ -159,7 +167,10 @@ async function main() {
   await field("audioEditStart", "00:00:02.000");
   await field("audioEditEnd", "00:00:06.000");
   await click("audioKeep");
-  session = await saved();
+  session = await until(async () => {
+    const current = await saved();
+    return Math.abs(current.audioProject.clips.reduce((n,c)=>n+c.sourceEnd-c.sourceStart,0)-4)<0.001 ? current : false;
+  }, "keep selection autosaved");
   assert.ok(Math.abs(session.audioProject.clips.reduce((n,c)=>n+c.sourceEnd-c.sourceStart,0)-4)<0.001);
   pass("split, keep, undo and redo through the real interface");
   await screenshot("editor-first");

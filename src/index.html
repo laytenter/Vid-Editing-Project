@@ -7,18 +7,18 @@
     http-equiv="Content-Security-Policy"
     content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' file: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
   />
-  <title>Video Caption App</title>
+  <title>Vid Editing</title>
   <link rel="icon" type="image/svg+xml" href="./app-logo.svg" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
   <div class="app-shell">
   <header class="hero app-header">
-    <img class="app-logo" src="./app-logo.svg" alt="Video Caption App logo" width="72" height="72" />
+    <img class="app-logo" src="./app-logo.svg" alt="Vid Editing logo" width="72" height="72" />
     <div class="hero-copy">
       <p class="eyebrow">Local video workflow</p>
-      <h1>Video Caption App</h1>
-      <p class="hero-tagline">Generate captions, export subtitle files, and clip footage locally with FFmpeg and Whisper.</p>
+      <h1>Vid Editing</h1>
+      <p class="hero-tagline">Edit audio, generate captions, and clip video on your computer.</p>
     </div>
     <button id="detailsToggleButton" class="header-details-button" type="button" aria-controls="detailsDrawer" aria-expanded="false">Clips & Files</button>
     <button id="showLogButton" class="header-log-button" type="button">Show Log</button>
@@ -32,7 +32,7 @@
     <button class="workflow-nav-button" type="button" data-workflow-target="details" aria-pressed="false" aria-controls="detailsDrawer">Details</button>
     <button class="workflow-nav-button" type="button" data-workflow-target="log" aria-pressed="false" aria-controls="logDrawer">Log</button>
   </nav>
-  <main class="workspace" aria-label="Video caption workspace">
+  <main class="workspace" aria-label="Video editing workspace">
   <div class="workspace-column controls-column">
   <section id="sourcePanel" class="source-panel workspace-card">
     <div class="section-header">
