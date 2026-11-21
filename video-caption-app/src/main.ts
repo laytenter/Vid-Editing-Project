@@ -1,4 +1,4 @@
-﻿import type {
+import type {
   BrowserWindow as BrowserWindowType,
   IpcMainInvokeEvent,
   MenuItemConstructorOptions,
@@ -8,13 +8,19 @@
   SaveDialogReturnValue
 } from "electron";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { createHash } from "node:crypto";
-import { copyFileSync, createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { copyFileSync, createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statfsSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import Store from "electron-store";
 import type {
   AppSettings,
+  AudioEditRequest,
+  AudioEditResult,
+  AudioAnalysis,
+  AudioEditProject,
+  AudioRenderRequest,
+  AudioRenderResult,
   CaptionProjectSession,
   ClipVideoRequest,
   ExtractAudioResult,
@@ -25,6 +31,8 @@ import type {
   SaveTextAsRequest,
   ToolLogEntry
 } from "./types";
+import { audioEditUtils } from "./audio-edit-utils";
+import { audioOutputArguments, buildAudioFilterGraph, editedDuration, parseAudioMetadata, parseLoudnessMeasurement, PeakAccumulator, type AudioMetadata } from "./audio-processing";
 
 const electronRuntime = require("electron");
 if (typeof electronRuntime === "string") {
@@ -40,7 +48,7 @@ console.log("[startup] process.versions:", process.versions);
 console.log("[startup] typeof require('electron'):", typeof electronRuntime);
 console.log("[startup] Object.keys(require('electron') || {}):", Object.keys(electronRuntime || {}));
 
-type BinaryName = "ffmpeg.exe" | "whisper.exe";
+type BinaryName = "ffmpeg.exe" | "ffprobe.exe" | "whisper.exe";
 type ToolName = ToolLogEntry["tool"];
 type StreamName = ToolLogEntry["stream"];
 
@@ -51,7 +59,7 @@ const CONTENT_SECURITY_POLICY =
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"]);
 const AUDIO_EXTENSIONS = new Set([".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma", ".aiff", ".aif"]);
 const REQUIRED_RUNTIME_FILES: Record<ToolName, readonly string[]> = {
-  ffmpeg: ["ffmpeg.exe"],
+  ffmpeg: ["ffmpeg.exe", "ffprobe.exe"],
   whisper: ["whisper.exe", "whisper.dll", "ggml.dll", "ggml-base.dll", "ggml-cpu.dll"]
 };
 
@@ -79,6 +87,10 @@ interface RuntimeDependencyManifest {
 
 let runtimeDependencyManifest: RuntimeDependencyManifest | null = null;
 const knownFilePaths = new Set<string>();
+const originalMediaPaths = new Set<string>();
+const analyzedSources = new Map<string, AudioAnalysis & { streamIndex: number; fileSignature: string }>();
+const renderedAudioCache = new Map<string, { result: AudioRenderResult; fileSignature: string }>();
+const MAX_PREVIEW_BYTES = 2 * 1024 * 1024 * 1024;
 
 const settingsStore = new Store<PersistedSettings & { captionProject?: CaptionProjectSession }>({
   defaults: {
@@ -148,16 +160,35 @@ function rememberFilePath(filePath: string): string {
   return resolved;
 }
 
+function rememberOriginalMediaPath(filePath: string): string {
+  originalMediaPaths.add(path.resolve(filePath));
+  return rememberFilePath(filePath);
+}
+
+function assertNotOriginalDestination(destinationPath: string): void {
+  const destinationStat = existsSync(destinationPath) ? statSync(destinationPath) : null;
+  for (const originalPath of originalMediaPaths) {
+    if (getPathKey(destinationPath) === getPathKey(originalPath)) throw new Error("Choose another file name to keep the original recording safe.");
+    if (destinationStat && existsSync(originalPath)) {
+      const originalStat = statSync(originalPath);
+      if (originalStat.dev === destinationStat.dev && originalStat.ino === destinationStat.ino) throw new Error("The export points to an original recording. Choose another file.");
+    }
+  }
+}
+
 function isKnownFilePath(input: unknown): input is string {
   return typeof input === "string" && input.trim() !== "" && knownFilePaths.has(getPathKey(input));
 }
 
-function sha256File(filePath: string): Promise<string> {
+function sha256File(filePath: string, isCancelled?: () => boolean): Promise<string> {
   return new Promise((resolve, reject) => {
     const hash = createHash("sha256");
     const stream = createReadStream(filePath);
     stream.on("error", reject);
-    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("data", (chunk) => {
+      if (isCancelled?.()) stream.destroy(new Error(MEDIA_PROCESS_CANCELLED_MESSAGE));
+      else hash.update(chunk);
+    });
     stream.on("end", () => resolve(hash.digest("hex")));
   });
 }
@@ -207,6 +238,7 @@ function normalizeExistingFile(input: unknown, label: string): string {
   if (!existsSync(resolved)) {
     throw new Error(`${label} not found: ${resolved}`);
   }
+  if (!statSync(resolved).isFile()) throw new Error(`${label} must be a file`);
 
   return resolved;
 }
@@ -301,7 +333,14 @@ function updatePersistedSettings(partial: Partial<PersistedSettings>): Persisted
 }
 
 function getCaptionProjectSession(): CaptionProjectSession | null {
-  return settingsStore.get("captionProject") ?? null;
+  const stored = settingsStore.get("captionProject");
+  if (!stored) return null;
+  try {
+    return validateCaptionSession(stored);
+  } catch (error) {
+    console.warn("Saved project is invalid; leaving its stored data unchanged:", error);
+    return null;
+  }
 }
 
 function getCaptionProjectPaths(session: CaptionProjectSession): string[] {
@@ -316,45 +355,102 @@ function getCaptionProjectPaths(session: CaptionProjectSession): string[] {
     session.audioPath,
     session.srtPath,
     session.vttPath,
+    session.audioProject?.sourcePath,
+    ...(session.captionSets ?? []).flatMap((set) => [set.mediaPath, set.project.sourcePath]),
     ...queuedClipPaths
   ].filter((filePath): filePath is string => typeof filePath === "string" && filePath.trim() !== "");
 }
 
 function rememberPersistedCaptionProjectPaths(): void {
   const session = getCaptionProjectSession();
-  if (!session || session.version !== 1) {
+  if (!session) {
     return;
   }
 
   for (const filePath of getCaptionProjectPaths(session)) {
-    if (existsSync(path.resolve(filePath))) {
+    if (existsSync(path.resolve(filePath)) && statSync(filePath).isFile()) {
       rememberFilePath(filePath);
     }
   }
+  for (const sourcePath of [session.selectedVideoPath, session.audioPath, session.audioProject?.sourcePath, ...(session.captionSets ?? []).map((set) => set.project.sourcePath)]) {
+    if (sourcePath) originalMediaPaths.add(path.resolve(sourcePath));
+  }
 }
 
-function setCaptionProjectSession(input: unknown): void {
-  if (!input || typeof input !== "object" || (input as Partial<CaptionProjectSession>).version !== 1) {
-    throw new Error("caption project must be a version 1 session");
+function validateCaptionSession(input: unknown): CaptionProjectSession {
+  if (!input || typeof input !== "object" || ![1, 2].includes(Number((input as Partial<CaptionProjectSession>).version))) {
+    throw new Error("caption project must be a version 1 or 2 session");
   }
-
-  const session = input as CaptionProjectSession;
-  if (!Array.isArray(session.queuedClips) || !Array.isArray(session.captionSegments)) {
+  // A bounded plain JSON copy prevents prototype/undefined values entering storage.
+  const encoded = JSON.stringify(input);
+  if (encoded.length > 8 * 1024 * 1024) throw new Error("Saved project is too large");
+  const session = JSON.parse(encoded) as CaptionProjectSession;
+  if (!Array.isArray(session.queuedClips) || session.queuedClips.length > 1000 || !Array.isArray(session.captionSegments)) {
     throw new Error("caption project arrays are invalid");
   }
-
   for (const filePath of [session.selectedVideoPath, session.audioPath, session.srtPath, session.vttPath]) {
-    if (filePath !== null && typeof filePath !== "string") {
+    if (filePath !== null && (typeof filePath !== "string" || filePath.length > 32768 || !path.isAbsolute(filePath))) {
       throw new Error("caption project file paths must be strings or null");
     }
   }
-
-  if (session.queuedClips.some((clip) => !clip || typeof clip !== "object" || typeof clip.videoPath !== "string")) {
+  if (![null, "uploaded", "extracted"].includes(session.audioSourceKind) ||
+      !["copy", "encode"].includes(session.clipMode) || typeof session.clipStart !== "string" || typeof session.clipEnd !== "string") {
+    throw new Error("Saved caption settings are invalid");
+  }
+  if (session.queuedClips.some((clip) => !clip || typeof clip !== "object" || typeof clip.videoPath !== "string" || !path.isAbsolute(clip.videoPath) ||
+      !Number.isFinite(clip.id) || !["copy", "encode"].includes(clip.mode) || typeof clip.startTime !== "string" || typeof clip.endTime !== "string" || typeof clip.preview !== "string")) {
     throw new Error("caption project queued clip paths are invalid");
   }
-
+  const validateSegments = (segments: CaptionProjectSession["captionSegments"]) => {
+    if (!Array.isArray(segments) || segments.length > 50000 || segments.some((segment) => !segment ||
+        !Number.isInteger(segment.index) || typeof segment.start !== "string" || segment.start.length > 32 ||
+        typeof segment.end !== "string" || segment.end.length > 32 || typeof segment.text !== "string" || segment.text.length > 20000 ||
+        (segment.edited !== undefined && typeof segment.edited !== "boolean"))) throw new Error("Saved captions are invalid");
+  };
+  validateSegments(session.captionSegments);
+  if (session.audioProject) session.audioProject = audioEditUtils.validateProject(session.audioProject);
+  const savedDuration = session.audioProject ? editedDuration(session.audioProject) : 86400;
+  if (session.audioSelection !== undefined) {
+    const selection = session.audioSelection;
+    if (!selection || !Number.isFinite(selection.start) || !Number.isFinite(selection.end) || selection.start < 0 ||
+        selection.end < selection.start || selection.end > savedDuration + 1e-6) throw new Error("Saved audio selection is invalid");
+  }
+  if (session.audioPlayhead !== undefined && (!Number.isFinite(session.audioPlayhead) || session.audioPlayhead < 0 || session.audioPlayhead > savedDuration + 1e-6)) {
+    throw new Error("Saved audio playhead is invalid");
+  }
+  if (session.captionSource !== undefined && session.captionSource !== "original" && session.captionSource !== "edited") throw new Error("Invalid caption source");
+  if (session.captionSets !== undefined) {
+    if (!Array.isArray(session.captionSets) || session.captionSets.length > 100) throw new Error("Too many caption versions");
+    const ids = new Set<string>();
+    for (const set of session.captionSets) {
+      if (!set || typeof set.id !== "string" || !set.id || set.id.length > 200 || ids.has(set.id) || typeof set.label !== "string" || set.label.length > 500 ||
+          !["original", "edited"].includes(set.sourceKind) || typeof set.mediaPath !== "string" || !path.isAbsolute(set.mediaPath)) throw new Error("Invalid saved caption version");
+      ids.add(set.id);
+      set.project = audioEditUtils.validateProject(set.project);
+      validateSegments(set.segments);
+    }
+    if (session.activeCaptionSetId != null && !ids.has(session.activeCaptionSetId)) throw new Error("Selected caption version is missing");
+  }
   for (const filePath of getCaptionProjectPaths(session)) {
-    if (!isKnownFilePath(filePath)) {
+    const extension = path.extname(filePath).toLowerCase();
+    if (!path.isAbsolute(filePath) || filePath.length > 32768 || (!AUDIO_EXTENSIONS.has(extension) && !VIDEO_EXTENSIONS.has(extension) && extension !== ".srt" && extension !== ".vtt")) {
+      throw new Error("Saved project contains an unsupported file path");
+    }
+  }
+  session.version = 2;
+  session.captionSource ??= "original";
+  session.captionSets ??= [];
+  session.activeCaptionSetId ??= null;
+  return session;
+}
+
+function setCaptionProjectSession(input: unknown): void {
+  const session = validateCaptionSession(input);
+  const previous = getCaptionProjectSession();
+  const previousPaths = new Set(previous ? getCaptionProjectPaths(previous).map(getPathKey) : []);
+  for (const filePath of getCaptionProjectPaths(session)) {
+    // Missing saved media stays recoverable, without granting execution access to a new path.
+    if (!isKnownFilePath(filePath) && !previousPaths.has(getPathKey(filePath))) {
       throw new Error("caption project contains a path that was not selected or generated by this application");
     }
   }
@@ -489,7 +585,7 @@ async function promptVideoSelection(ownerWindow?: BrowserWindowType): Promise<st
     throw new Error("The selected file is not a supported video");
   }
 
-  return rememberFilePath(selectedPath);
+  return rememberOriginalMediaPath(selectedPath);
 }
 
 async function promptAudioSelection(ownerWindow?: BrowserWindowType): Promise<string | null> {
@@ -511,7 +607,7 @@ async function promptAudioSelection(ownerWindow?: BrowserWindowType): Promise<st
     throw new Error("The selected file is not a supported audio file");
   }
 
-  return rememberFilePath(selectedPath);
+  return rememberOriginalMediaPath(selectedPath);
 }
 
 function sendMenuOpenVideo(videoPath: string): void {
@@ -697,7 +793,8 @@ async function runTool(
   tool: ToolName,
   binaryPath: string,
   args: string[],
-  cwd?: string
+  cwd?: string,
+  output?: { stdout?: (chunk: Buffer) => void; stderr?: (chunk: string) => void; quiet?: boolean }
 ): Promise<void> {
   throwIfMediaRunCancelled(run);
 
@@ -705,7 +802,9 @@ async function runTool(
   throwIfMediaRunCancelled(run);
 
   return new Promise<void>((resolve, reject) => {
-    const child = spawn(binaryPath, args, {
+    // Selected media is local-only, even if a disguised container references a URL.
+    const safeArgs = tool === "ffmpeg" ? ["-protocol_whitelist", "file,pipe", ...args] : args;
+    const child = spawn(binaryPath, safeArgs, {
       cwd,
       windowsHide: true,
       shell: false
@@ -731,11 +830,13 @@ async function runTool(
     };
 
     child.stdout.on("data", (chunk) => {
-      emitToolLog(event, tool, "stdout", chunk.toString());
+      if (output?.stdout) output.stdout(chunk as Buffer);
+      else if (!output?.quiet) emitToolLog(event, tool, "stdout", chunk.toString());
     });
 
     child.stderr.on("data", (chunk) => {
-      emitToolLog(event, tool, "stderr", chunk.toString());
+      output?.stderr?.(chunk.toString());
+      if (!output?.quiet) emitToolLog(event, tool, "stderr", chunk.toString());
     });
 
     child.on("error", (error) => {
@@ -759,16 +860,13 @@ async function runTool(
 }
 
 async function resolveWhisperAudioPath(event: IpcMainInvokeEvent, run: ActiveMediaRun, audioPath: string): Promise<string> {
-  if (path.extname(audioPath).toLowerCase() !== ".m4a") {
-    return audioPath;
-  }
-
   const tempDir = resolveTempDir();
   const convertedAudioPath = getUniqueFilePath(tempDir, `${getSafeBaseName(audioPath)}_uploaded`, ".wav");
   const args = [
-    "-y",
+    "-nostdin", "-y",
     "-i",
     audioPath,
+    "-map", "0:a:0",
     "-vn",
     "-ac",
     "1",
@@ -779,10 +877,201 @@ async function resolveWhisperAudioPath(event: IpcMainInvokeEvent, run: ActiveMed
     convertedAudioPath
   ];
 
-  await runTool(event, run, "ffmpeg", resolveBinaryPath("ffmpeg.exe"), args, path.dirname(audioPath));
-  throwIfMediaRunCancelled(run);
+  try {
+    await runTool(event, run, "ffmpeg", resolveBinaryPath("ffmpeg.exe"), args, path.dirname(audioPath));
+    throwIfMediaRunCancelled(run);
+    return convertedAudioPath;
+  } catch (error) {
+    removeIncompleteFile(convertedAudioPath);
+    throw error;
+  }
+}
 
-  return rememberFilePath(convertedAudioPath);
+function removeIncompleteFile(filePath: string): void {
+  if (existsSync(filePath)) {
+    try { unlinkSync(filePath); } catch (error) { console.warn("Could not remove incomplete audio output", filePath, error); }
+  }
+}
+
+function fileSignature(filePath: string): string {
+  const stat = statSync(filePath);
+  return `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
+}
+
+function checkAudioStorage(directory: string, bytes: number, managedPreview: boolean): void {
+  if (managedPreview && bytes > MAX_PREVIEW_BYTES) {
+    throw new Error("This recording needs more than 2 GB for an audio preview. Choose a shorter recording or extract a shorter section first.");
+  }
+  try {
+    const space = statfsSync(directory);
+    if (space.bavail * space.bsize < bytes + 64 * 1024 * 1024) throw new Error("There is not enough free disk space to prepare this audio. Free some space or choose another export drive.");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOSYS" && (error as NodeJS.ErrnoException).code !== "ENOTSUP") throw error;
+  }
+}
+
+function retainedAudioPaths(): Set<string> {
+  const saved = getCaptionProjectSession();
+  return new Set(saved ? getCaptionProjectPaths(saved).map(getPathKey) : []);
+}
+
+function pruneAudioCaches(): void {
+  const retained = retainedAudioPaths();
+  while (renderedAudioCache.size > 12) {
+    const key = renderedAudioCache.keys().next().value as string;
+    const old = renderedAudioCache.get(key)!;
+    renderedAudioCache.delete(key);
+    if (!retained.has(getPathKey(old.result.outputPath))) {
+      removeIncompleteFile(old.result.outputPath);
+      knownFilePaths.delete(getPathKey(old.result.outputPath));
+    }
+  }
+  while (analyzedSources.size > 4) {
+    const key = analyzedSources.keys().next().value as string;
+    const old = analyzedSources.get(key)!;
+    analyzedSources.delete(key);
+    if (!retained.has(getPathKey(old.previewPath))) {
+      removeIncompleteFile(old.previewPath);
+      knownFilePaths.delete(getPathKey(old.previewPath));
+    }
+  }
+}
+
+function removeAbandonedAudioPreviews(): void {
+  const retained = retainedAudioPaths();
+  const tempDir = resolveTempDir();
+  const cutoff = Date.now() - 7 * 86400 * 1000;
+  for (const name of readdirSync(tempDir)) {
+    if (!/^(?:original-[a-f0-9]{64}-[a-f0-9-]{36}\.wav|\.audio-[a-f0-9-]{36}\.(?:wav|mp3|flac)|audio-filter-[a-f0-9-]{36}\.txt)$/.test(name)) continue;
+    const candidate = path.join(tempDir, name);
+    if (!retained.has(getPathKey(candidate)) && statSync(candidate).mtimeMs < cutoff) removeIncompleteFile(candidate);
+  }
+}
+
+async function probeAudio(event: IpcMainInvokeEvent, run: ActiveMediaRun, sourcePath: string): Promise<AudioMetadata> {
+  let stdout = "";
+  await runTool(event, run, "ffmpeg", resolveBinaryPath("ffprobe.exe"), ["-v", "error", "-select_streams", "a:0",
+    "-show_entries", "stream=index,sample_rate,channels,duration:format=duration", "-of", "json", sourcePath],
+    path.dirname(sourcePath), { quiet: true, stdout: (chunk) => { if (stdout.length < 1024 * 1024) stdout += chunk.toString(); } });
+  throwIfMediaRunCancelled(run);
+  return parseAudioMetadata(stdout);
+}
+
+async function analyzeSource(event: IpcMainInvokeEvent, run: ActiveMediaRun, input: unknown): Promise<AudioAnalysis> {
+  const sourcePath = normalizeKnownExistingFile(input, "audio source");
+  normalizeSupportedMediaFile(sourcePath, "audio source");
+  const signature = fileSignature(sourcePath);
+  const key = getPathKey(sourcePath);
+  const cached = analyzedSources.get(key);
+  if (cached?.fileSignature === signature && existsSync(cached.previewPath)) {
+    return { sourcePath, sourceFingerprint: cached.sourceFingerprint, duration: cached.duration, sampleRate: cached.sampleRate,
+      channels: cached.channels, peaks: cached.peaks, previewPath: cached.previewPath };
+  }
+  const metadata = await probeAudio(event, run, sourcePath);
+  checkAudioStorage(resolveTempDir(), metadata.duration * metadata.sampleRate * metadata.channels * 3, true);
+  const sourceFingerprint = await sha256File(sourcePath, () => run.cancelled);
+  throwIfMediaRunCancelled(run);
+  const peaks = new PeakAccumulator(metadata.duration);
+  const previewPath = path.join(resolveTempDir(), `original-${sourceFingerprint}-${randomUUID()}.wav`);
+  try {
+    // One decode supplies the bounded overview and a browser-compatible full-quality playback proxy.
+    await runTool(event, run, "ffmpeg", resolveBinaryPath("ffmpeg.exe"), ["-nostdin", "-y", "-hide_banner", "-i", sourcePath,
+      "-map", `0:${metadata.streamIndex}`, "-vn", "-ac", "1", "-ar", "8000", "-f", "f32le", "pipe:1",
+      "-map", `0:${metadata.streamIndex}`, "-vn", "-ar", String(metadata.sampleRate), "-ac", String(metadata.channels), "-c:a", "pcm_s24le", "-rf64", "auto", previewPath],
+      path.dirname(sourcePath), { stdout: (chunk) => peaks.push(chunk) });
+    throwIfMediaRunCancelled(run);
+    if (fileSignature(sourcePath) !== signature) throw new Error("The original recording changed while it was loading. Open it again.");
+    const result: AudioAnalysis = { sourcePath, sourceFingerprint, duration: metadata.duration, sampleRate: metadata.sampleRate,
+      channels: metadata.channels, peaks: peaks.finish(), previewPath: rememberFilePath(previewPath) };
+    analyzedSources.set(key, { ...result, streamIndex: metadata.streamIndex, fileSignature: signature });
+    pruneAudioCaches();
+    return result;
+  } catch (error) {
+    removeIncompleteFile(previewPath);
+    throw error;
+  }
+}
+
+async function renderAudioProject(event: IpcMainInvokeEvent, run: ActiveMediaRun, input: unknown): Promise<AudioRenderResult | null> {
+  if (!input || typeof input !== "object") throw new Error("Audio render request must be an object");
+  const request = input as AudioRenderRequest;
+  const project: AudioEditProject = audioEditUtils.validateProject(request.project);
+  if (!["preview", "caption", "export"].includes(request.purpose)) throw new Error("Invalid audio render purpose");
+  const outputProfile = audioOutputArguments(request.format, project.sampleRate, project.channels);
+  const sourcePath = normalizeKnownExistingFile(project.sourcePath, "audio source");
+  normalizeSupportedMediaFile(sourcePath, "audio source");
+  const sourceSignature = fileSignature(sourcePath);
+  const fingerprint = await sha256File(sourcePath, () => run.cancelled);
+  throwIfMediaRunCancelled(run);
+  if (fingerprint !== project.sourceFingerprint) throw new Error("The original recording has changed. Open it again before using these edits.");
+  const metadata = await probeAudio(event, run, sourcePath);
+  if (Math.abs(metadata.duration - project.duration) > 0.025 || metadata.sampleRate !== project.sampleRate || metadata.channels !== project.channels) {
+    throw new Error("The saved audio metadata no longer matches the original recording. Open it again.");
+  }
+  const cacheKey = createHash("sha256").update(JSON.stringify({ project, format: request.format })).digest("hex");
+  const cached = renderedAudioCache.get(cacheKey);
+  if (request.purpose !== "export" && cached && existsSync(cached.result.outputPath) && fileSignature(cached.result.outputPath) === cached.fileSignature) {
+    if (fileSignature(sourcePath) !== sourceSignature) throw new Error("The original recording changed while loading. Open it again.");
+    renderedAudioCache.delete(cacheKey);
+    renderedAudioCache.set(cacheKey, cached);
+    return cached.result;
+  }
+  let destinationPath: string | null = null;
+  if (request.purpose === "export") {
+    const save = await showSaveDialogForSender(event, { title: "Export audio", defaultPath: path.join(path.dirname(sourcePath), `${getSafeBaseName(sourcePath)}_edited.${request.format}`),
+      filters: [{ name: `${request.format.toUpperCase()} audio`, extensions: [request.format] }] });
+    throwIfMediaRunCancelled(run);
+    if (save.canceled || !save.filePath) return null;
+    destinationPath = path.resolve(save.filePath);
+    if (!path.extname(destinationPath)) destinationPath += `.${request.format}`;
+    if (path.extname(destinationPath).toLowerCase() !== `.${request.format}`) throw new Error(`Use a .${request.format} file name for this export.`);
+    if (getPathKey(destinationPath) === getPathKey(sourcePath)) throw new Error("Choose another file name to keep the original recording safe.");
+    assertNotOriginalDestination(destinationPath);
+  }
+  // A sibling temporary output makes the final rename atomic on the destination volume.
+  const outputPath = path.join(destinationPath ? path.dirname(destinationPath) : resolveTempDir(), `.audio-${randomUUID()}.${request.format}`);
+  checkAudioStorage(path.dirname(outputPath), editedDuration(project) * project.sampleRate * project.channels * 3, request.purpose !== "export");
+  const filterPath = path.join(resolveTempDir(), `audio-filter-${randomUUID()}.txt`);
+  let completed = false;
+  try {
+    let measurement = null;
+    if (project.effects.normalize) {
+      let stderr = "";
+      writeFileSync(filterPath, buildAudioFilterGraph(project, metadata.streamIndex, "measure"), "utf8");
+      await runTool(event, run, "ffmpeg", resolveBinaryPath("ffmpeg.exe"), ["-nostdin", "-hide_banner", "-i", sourcePath,
+        "-filter_complex_script", filterPath, "-map", "[out]", "-f", "null", "-"],
+        path.dirname(sourcePath), { stderr: (chunk) => { stderr = (stderr + chunk).slice(-65536); } });
+      measurement = parseLoudnessMeasurement(stderr);
+      if (!measurement) emitToolLog(event, "ffmpeg", "stderr", "The recording is silent or has no measurable loudness; normalization was skipped.\n");
+    }
+    writeFileSync(filterPath, buildAudioFilterGraph(project, metadata.streamIndex, measurement), "utf8");
+    await runTool(event, run, "ffmpeg", resolveBinaryPath("ffmpeg.exe"), ["-nostdin", "-hide_banner", "-y", "-i", sourcePath,
+      "-filter_complex_script", filterPath, "-map", "[out]", "-vn", ...outputProfile, outputPath], path.dirname(sourcePath));
+    throwIfMediaRunCancelled(run);
+    const outputMetadata = await probeAudio(event, run, outputPath);
+    const expectedDuration = editedDuration(project);
+    // Tempo filters and compressed encoders introduce bounded delay/padding, unlike PCM-only trims.
+    const tolerance = request.format === "mp3" || project.effects.speed !== 1 || project.effects.pitchSemitones !== 0 ? 0.2 : 0.025;
+    if (Math.abs(outputMetadata.duration - expectedDuration) > tolerance || outputMetadata.sampleRate !== project.sampleRate || outputMetadata.channels !== project.channels) {
+      throw new Error("The rendered audio did not match the requested duration or audio quality. The export was not saved.");
+    }
+    throwIfMediaRunCancelled(run);
+    if (fileSignature(sourcePath) !== sourceSignature) throw new Error("The original recording changed during processing. Open it again before exporting.");
+    if (destinationPath) {
+      assertNotOriginalDestination(destinationPath);
+      renameSync(outputPath, destinationPath);
+    }
+    completed = true;
+    const result = { outputPath: rememberFilePath(destinationPath ?? outputPath), format: request.format, duration: outputMetadata.duration };
+    if (!destinationPath) {
+      renderedAudioCache.set(cacheKey, { result, fileSignature: fileSignature(outputPath) });
+      pruneAudioCaches();
+    }
+    return result;
+  } finally {
+    removeIncompleteFile(filterPath);
+    if (!completed) removeIncompleteFile(outputPath);
+  }
 }
 
 function createWindow(): void {
@@ -814,6 +1103,7 @@ if (process.platform === "win32") {
 
 app.whenReady().then(() => {
   rememberPersistedCaptionProjectPaths();
+  removeAbandonedAudioPreviews();
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
@@ -868,13 +1158,19 @@ app.whenReady().then(() => {
     return promptAudioSelection(getOwnerWindowFromEvent(event));
   });
 
+  registerIpcHandler("analyze-audio", async (event, sourcePath: unknown): Promise<AudioAnalysis> =>
+    withMediaRun(event, (run) => analyzeSource(event, run, sourcePath)));
+
+  registerIpcHandler("render-edited-audio", async (event, request: unknown): Promise<AudioRenderResult | null> =>
+    withMediaRun(event, (run) => renderAudioProject(event, run, request)));
+
   registerIpcHandler("authorize-dropped-file", async (_event, droppedPath: unknown): Promise<string | null> => {
     if (typeof droppedPath !== "string" || droppedPath.trim() === "") {
       return null;
     }
 
     try {
-      return rememberFilePath(normalizeSupportedMediaFile(droppedPath, "dropped file"));
+      return rememberOriginalMediaPath(normalizeSupportedMediaFile(droppedPath, "dropped file"));
     } catch {
       return null;
     }
@@ -885,25 +1181,16 @@ app.whenReady().then(() => {
       const resolvedVideoPath = normalizeKnownExistingFile(videoPath, "videoPath");
       const tempDir = resolveTempDir();
       const audioPath = getUniqueFilePath(tempDir, `${getSafeBaseName(resolvedVideoPath)}_audio`, ".wav");
-
-      const args = [
-        "-y",
-        "-i",
-        resolvedVideoPath,
-        "-vn",
-        "-ac",
-        "1",
-        "-ar",
-        "16000",
-        "-c:a",
-        "pcm_s16le",
-        audioPath
-      ];
-
-      await runTool(event, run, "ffmpeg", resolveBinaryPath("ffmpeg.exe"), args, path.dirname(resolvedVideoPath));
-      throwIfMediaRunCancelled(run);
-
-      return { audioPath: rememberFilePath(audioPath) };
+      const metadata = await probeAudio(event, run, resolvedVideoPath);
+      try {
+        await runTool(event, run, "ffmpeg", resolveBinaryPath("ffmpeg.exe"), ["-nostdin", "-y", "-i", resolvedVideoPath,
+          "-map", `0:${metadata.streamIndex}`, "-vn", ...audioOutputArguments("wav", metadata.sampleRate, metadata.channels), audioPath], path.dirname(resolvedVideoPath));
+        throwIfMediaRunCancelled(run);
+        return { audioPath: rememberFilePath(audioPath) };
+      } catch (error) {
+        removeIncompleteFile(audioPath);
+        throw error;
+      }
     });
   });
 
@@ -972,7 +1259,7 @@ app.whenReady().then(() => {
       }
 
       const tempDir = resolveTempDir();
-      const outputBase = path.resolve(tempDir, "captions");
+      const outputBase = path.resolve(tempDir, `captions-${randomUUID()}`);
       const tempSrtPath = `${outputBase}.srt`;
       const tempVttPath = `${outputBase}.vtt`;
 
@@ -986,30 +1273,51 @@ app.whenReady().then(() => {
 
       const whisperAudioPath = await resolveWhisperAudioPath(event, run, audioPath);
       const args = ["-m", modelPath, "-f", whisperAudioPath, "-of", outputBase, "-osrt", "-ovtt"];
-
-      await runTool(event, run, "whisper", resolveBinaryPath("whisper.exe"), args, path.dirname(whisperAudioPath));
-      throwIfMediaRunCancelled(run);
-
-      if (!existsSync(tempSrtPath) || !existsSync(tempVttPath)) {
-        throw new Error("Whisper finished without producing expected SRT/VTT files");
+      let completed = false;
+      try {
+        await runTool(event, run, "whisper", resolveBinaryPath("whisper.exe"), args, path.dirname(whisperAudioPath));
+        throwIfMediaRunCancelled(run);
+        if (!existsSync(tempSrtPath) || !existsSync(tempVttPath)) throw new Error("Whisper finished without producing expected SRT/VTT files");
+        const srtText = readFileSync(tempSrtPath, "utf8");
+        throwIfMediaRunCancelled(run);
+        completed = true;
+        return { srtPath: rememberFilePath(tempSrtPath), vttPath: rememberFilePath(tempVttPath), modelPath, srtText };
+      } finally {
+        removeIncompleteFile(whisperAudioPath);
+        if (!completed) {
+          removeIncompleteFile(tempSrtPath);
+          removeIncompleteFile(tempVttPath);
+        }
       }
-
-      const srtText = readFileSync(tempSrtPath, "utf8");
-      throwIfMediaRunCancelled(run);
-
-      return {
-        srtPath: rememberFilePath(tempSrtPath),
-        vttPath: rememberFilePath(tempVttPath),
-        modelPath,
-        srtText
-      };
     });
   });
 
+  registerIpcHandler("export-edited-audio", async (event, input: unknown): Promise<AudioEditResult> => {
+    return withMediaRun(event, async (run) => {
+      const request = input as Partial<AudioEditRequest>;
+      const sourcePath = normalizeKnownExistingFile(request?.sourcePath, "sourcePath");
+      const format = request?.format;
+      if (format !== "wav" && format !== "mp3" && format !== "flac") throw new Error("format must be wav, mp3, or flac");
+      const analysis = await analyzeSource(event, run, sourcePath);
+      const parseTime = (value: unknown, fallback: number): number => {
+        if (value === undefined || value === "") return fallback;
+        if (typeof value !== "string" || !/^\d{1,4}:[0-5]\d:[0-5]\d(?:\.\d{1,6})?$/.test(value)) throw new Error("Use hours:minutes:seconds for the audio selection");
+        const [hours, minutes, seconds] = value.split(":").map(Number);
+        return hours * 3600 + minutes * 60 + seconds;
+      };
+      const project: AudioEditProject = { version: 1, sourcePath, sourceFingerprint: analysis.sourceFingerprint, duration: analysis.duration,
+        sampleRate: analysis.sampleRate, channels: analysis.channels, revision: 0,
+        clips: [{ id: "legacy-selection", trackId: "track-1", sourceStart: parseTime(request.startTime, 0), sourceEnd: parseTime(request.endTime, analysis.duration),
+          gainDb: 0, fadeInSeconds: 0, fadeOutSeconds: 0 }],
+        effects: { gainDb: request.gainDb ?? 0, fadeInSeconds: request.fadeInSeconds ?? 0, fadeOutSeconds: request.fadeOutSeconds ?? 0,
+          speed: request.speed ?? 1, pitchSemitones: request.pitchSemitones ?? 0, normalize: request.normalize ?? false, noiseReduction: request.noiseReduction ?? false } };
+      return (await renderAudioProject(event, run, { project, format, purpose: "preview" }))!;
+    });
+  });
   registerIpcHandler("save-file-as", async (event, request: SaveFileAsRequest): Promise<string | null> => {
     const sourcePath = normalizeKnownExistingFile(request?.sourcePath, "sourcePath");
     const sourceExt = path.extname(sourcePath).toLowerCase();
-    const expectedExt = sourceExt === ".srt" || sourceExt === ".vtt" || sourceExt === ".wav" ? sourceExt : "";
+    const expectedExt = sourceExt === ".srt" || sourceExt === ".vtt" || sourceExt === ".wav" || sourceExt === ".mp3" || sourceExt === ".flac" ? sourceExt : "";
 
     const defaultFileName =
       typeof request?.defaultFileName === "string" && request.defaultFileName.trim() !== ""
@@ -1024,10 +1332,14 @@ app.whenReady().then(() => {
           ? [{ name: "WebVTT (.vtt)", extensions: ["vtt"] }]
           : expectedExt === ".wav"
             ? [{ name: "Wave Audio (.wav)", extensions: ["wav"] }]
-            : undefined;
+            : expectedExt === ".mp3"
+              ? [{ name: "MP3 Audio (.mp3)", extensions: ["mp3"] }]
+              : expectedExt === ".flac"
+                ? [{ name: "FLAC Audio (.flac)", extensions: ["flac"] }]
+                : undefined;
 
     const saveResult = await showSaveDialogForSender(event, {
-      title: expectedExt === ".wav" ? "Save Audio As" : "Save Captions As",
+      title: expectedExt === ".wav" || expectedExt === ".mp3" || expectedExt === ".flac" ? "Save Audio As" : "Save Captions As",
       defaultPath: path.resolve(defaultDirectory, defaultFileName),
       filters
     });
@@ -1041,6 +1353,7 @@ app.whenReady().then(() => {
       destinationPath += expectedExt;
     }
 
+    assertNotOriginalDestination(destinationPath);
     copyFileSync(sourcePath, destinationPath);
     return rememberFilePath(destinationPath);
   });

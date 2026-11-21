@@ -20,11 +20,13 @@ npm start
 ## Current Workflow
 
 1. Upload or drag in a video or supported audio file.
-2. For video, click **Extract Audio** and choose where to save the extracted WAV.
-3. Click **Generate Captions** to run Whisper locally.
+2. Open **Audio Editor** to split, keep, remove or duplicate sections, adjust the sound, and compare original and edited playback.
+3. Choose **Original audio** or **Edited audio** under **Generate captions from**, then click **Generate Captions** to run Whisper locally.
 4. Review, search, and edit caption segments. Click segments to seek playback and set clip ranges.
 5. Save edited captions with **Save SRT** or **Save VTT**.
 6. Create a single clip, or queue several ranges and click **Export All Clips**.
+
+The single-track editor keeps the original recording unchanged and saves reversible edits. Existing captions change only when you choose **Adjust caption timings** and create an adjusted copy. Reusable split clips prepare for later multiple-track editing. See the [audio editor plan and verification](video-caption-app/docs/audio-editor-plan.md) for scope and remaining acceptance checks.
 
 Caption and extracted-audio saves use a save dialog. Clips are exported automatically beside the selected video. All media processing stays local.
 

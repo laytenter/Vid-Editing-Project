@@ -13,6 +13,10 @@
         "ffmpeg.exe": {
           "archiveName": "ffmpeg.exe",
           "sha256": "228d7a8556258de907fdb55f36850078ebc7680b84ec30d84ea02e99bec1d1eb"
+        },
+        "ffprobe.exe": {
+          "archiveName": "ffprobe.exe",
+          "sha256": "0fde260f5abd35c9cafd96f594cc76365a780c1b73a90e35b6a3409ea1db1bf0"
         }
       }
     },

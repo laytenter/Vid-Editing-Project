@@ -15,11 +15,26 @@ Expected installed files:
 | Installed file | SHA-256 |
 | --- | --- |
 | `ffmpeg.exe` | `228d7a8556258de907fdb55f36850078ebc7680b84ec30d84ea02e99bec1d1eb` |
+| `ffprobe.exe` | `0fde260f5abd35c9cafd96f594cc76365a780c1b73a90e35b6a3409ea1db1bf0` |
 | `whisper.exe` (upstream `whisper-cli.exe`) | `0ff971e410240a0b97117432d771245698f376e06105c011959d2bfc4bb23311` |
 | `whisper.dll` | `4037a6567fbb08fc7efda18e4d128a95df9c31ba171af20439d1a93b785d007e` |
 | `ggml.dll` | `bcfeaf6e5b59c315fc36e290715aa7a84b22461e968543c13dfcf57df7b1b81d` |
 | `ggml-base.dll` | `61c9c57f49f380896ed54ed3f71735e10a2d986f482c2b0a55e72b47f731b193` |
 | `ggml-cpu.dll` | `eb2f1d023e51c40b27463b5ab165600eb48cb60323740f400b1b62e1c8706c56` |
+
+## Structured audio metadata
+
+The audio editor now uses ffprobe for structured metadata from the first audio stream. On 21 November 2026 the cached FFmpeg archive was re-hashed against the pinned archive digest above; the SHA-256 of its ffprobe entry matched the installed executable. Both FFmpeg tools are now in the strict runtime allowlist and the existing manifest-driven setup installs/verifies both.
+
+## Audio processing profiles
+
+Audio edits read the unchanged original, retaining its sample rate and channel count. WAV exports and audition copies use 24-bit PCM; FLAC exports use a 24-bit-capable encoder input. These formats do not restore detail absent from an original recording. MP3 supports mono/stereo and supported sample rates up to 48 kHz; unsupported source profiles receive a clear request to use WAV or FLAC instead of silent downmixing. Whisper always receives a separate temporary 16 kHz mono PCM copy, which is removed after the job.
+
+For each clip the graph trims in source time, resets timestamps and applies clip gain and fades. Clip fade lengths are entered in final playback seconds and scaled into source seconds before processing; cuts retain the original fade envelope. Clips are concatenated in order, then speed and pitch run once on the assembled signal to avoid accumulating filter delay at each cut. Noise reduction, master gain and optional two-pass loudness normalization follow; master fades are applied last, in final playback seconds. Normalization measures the assembled audio against a -16 LUFS / -1.5 dBTP / 11 LU preset and requests linear gain in the second pass. FFmpeg may use dynamic normalization when those measurements cannot satisfy the target linearly. Silent material skips normalization. Final fades change overall integrated loudness, so this control is a preset, not a guarantee of final -16 LUFS. The output sample rate is explicitly restored after normalization.
+
+Metadata is limited to a single audio stream, 1–8 channels, 8–192 kHz and 24 hours. The current editing proxy is additionally limited to 2 GiB of decoded audio (about 124 minutes at 48 kHz stereo); higher rate/channel counts reduce that duration. A free-space check runs before preparation and export. Waveform analysis streams samples into 4096 peak bins; it does not allocate the whole recording in renderer memory. Identical preview/caption renders are reused during the session. The twelve most recent renders and four source analyses are cached; evicting a preview never removes a file referenced by a saved caption version. At startup, unreferenced app-owned audio preview/filter files older than seven days are removed.
+
+Processing is cancellable, validates source fingerprints and output metadata, and publishes exports only after successful verification. Temporary transcription, filter and incomplete render files are removed after failure or cancellation. Completed audio/caption versions remain available for project recovery. Native media inputs allow only the local `file` and `pipe` protocols; an imported container cannot start an HTTP fetch through FFmpeg.
 
 ## Audit of the previously tracked binaries
 

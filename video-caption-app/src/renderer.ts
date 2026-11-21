@@ -6,8 +6,12 @@ type AppSettings = {
 type AudioSourceKind = "uploaded" | "extracted" | null;
 type ClipMode = "copy" | "encode";
 type ThemeMode = "system" | "dark" | "light" | "retro";
-type WorkflowSection = "source" | "process" | "clip" | "captions";
+type WorkflowSection = "source" | "process" | "clip" | "editor" | "captions";
 type WorkflowNavTarget = WorkflowSection | "details" | "log";
+type EditorProject = import("./types").AudioEditProject;
+type EditorAnalysis = import("./types").AudioAnalysis;
+type EditorCaptionSet = { id: string; label: string; sourceKind: "original" | "edited"; project: EditorProject; mediaPath: string; segments: CaptionSegment[] };
+type EditorHistoryEntry = { project: EditorProject; start: number; end: number; playhead: number; clipId: string | null };
 
 function mustGet<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -70,6 +74,56 @@ const clipAddRangeButton = mustGet<HTMLButtonElement>("clipAddRangeBtn");
 const queuedClipsCountNode = mustGet<HTMLElement>("queuedClipsCount");
 const queuedClipsListNode = mustGet<HTMLElement>("queuedClipsList");
 const queuedClipsExportButton = mustGet<HTMLButtonElement>("queuedClipsExportBtn");
+const audioEditorStatus = mustGet<HTMLElement>("audioEditorStatus");
+const audioWaveformCanvas = mustGet<HTMLCanvasElement>("audioWaveformCanvas");
+const audioEditorSelection = mustGet<HTMLElement>("audioEditorSelection");
+const audioEditorDuration = mustGet<HTMLElement>("audioEditorDuration");
+const audioEditStart = mustGet<HTMLInputElement>("audioEditStart");
+const audioEditEnd = mustGet<HTMLInputElement>("audioEditEnd");
+const audioEditGain = mustGet<HTMLInputElement>("audioEditGain");
+const audioEditFadeIn = mustGet<HTMLInputElement>("audioEditFadeIn");
+const audioEditFadeOut = mustGet<HTMLInputElement>("audioEditFadeOut");
+const audioEditSpeed = mustGet<HTMLInputElement>("audioEditSpeed");
+const audioEditPitch = mustGet<HTMLInputElement>("audioEditPitch");
+const audioEditNormalize = mustGet<HTMLInputElement>("audioEditNormalize");
+const audioEditNoise = mustGet<HTMLInputElement>("audioEditNoise");
+const audioEditFormat = mustGet<HTMLSelectElement>("audioEditFormat");
+const audioEditUndoButton = mustGet<HTMLButtonElement>("audioEditUndoButton");
+const audioEditResetButton = mustGet<HTMLButtonElement>("audioEditResetButton");
+const audioEditExportButton = mustGet<HTMLButtonElement>("audioEditExportButton");
+const audioEditorPanel = mustGet<HTMLElement>("audioEditorPanel");
+const audioEditorSource = mustGet<HTMLElement>("audioEditorSource");
+const audioEditorError = mustGet<HTMLElement>("audioEditorError");
+const audioEditorRetry = mustGet<HTMLButtonElement>("audioEditorRetry");
+const audioPlayOriginal = mustGet<HTMLButtonElement>("audioPlayOriginal");
+const audioPreviewEdited = mustGet<HTMLButtonElement>("audioPreviewEdited");
+const audioWaveformScroll = mustGet<HTMLElement>("audioWaveformScroll");
+const audioZoom = mustGet<HTMLSelectElement>("audioZoom");
+const audioPlayheadInput = mustGet<HTMLInputElement>("audioPlayhead");
+const audioSplit = mustGet<HTMLButtonElement>("audioSplit");
+const audioKeep = mustGet<HTMLButtonElement>("audioKeep");
+const audioRemove = mustGet<HTMLButtonElement>("audioRemove");
+const audioDuplicate = mustGet<HTMLButtonElement>("audioDuplicate");
+const audioUseCaptionRange = mustGet<HTMLButtonElement>("audioUseCaptionRange");
+const audioClipList = mustGet<HTMLElement>("audioClipList");
+const audioClipSettings = mustGet<HTMLFieldSetElement>("audioClipSettings");
+const audioClipGain = mustGet<HTMLInputElement>("audioClipGain");
+const audioClipFadeIn = mustGet<HTMLInputElement>("audioClipFadeIn");
+const audioClipFadeOut = mustGet<HTMLInputElement>("audioClipFadeOut");
+const audioExportScope = mustGet<HTMLSelectElement>("audioExportScope");
+const audioEditRedoButton = mustGet<HTMLButtonElement>("audioEditRedoButton");
+const captionSourceOriginal = mustGet<HTMLInputElement>("captionSourceOriginal");
+const captionSourceEdited = mustGet<HTMLInputElement>("captionSourceEdited");
+const captionSourceHelp = mustGet<HTMLElement>("captionSourceHelp");
+const captionSetSelect = mustGet<HTMLSelectElement>("captionSetSelect");
+const captionTimingNotice = mustGet<HTMLElement>("captionTimingNotice");
+const captionRemapButton = mustGet<HTMLButtonElement>("captionRemapButton");
+const captionRemapDialog = mustGet<HTMLDialogElement>("captionRemapDialog");
+const captionRemapSummary = mustGet<HTMLElement>("captionRemapSummary");
+const captionRemapChanges = mustGet<HTMLElement>("captionRemapChanges");
+const captionRemapReview = mustGet<HTMLElement>("captionRemapReview");
+const captionRemapCreate = mustGet<HTMLButtonElement>("captionRemapCreate");
+const captionRemapCancel = mustGet<HTMLButtonElement>("captionRemapCancel");
 const workflowNavButtons = Array.from(document.querySelectorAll<HTMLButtonElement>("[data-workflow-target]"));
 
 let selectedVideoPath: string | null = null;
@@ -92,7 +146,7 @@ logFilterSelect.value = "all";
 type ToolName = "ffmpeg" | "whisper";
 type StreamName = "stdout" | "stderr";
 type LogFilter = "all" | "ffmpeg" | "whisper" | "errors";
-type ActiveActionKind = "extract" | "caption" | "clip";
+type ActiveActionKind = "extract" | "caption" | "clip" | "editor";
 type ActionStatusMode = "idle" | "indeterminate" | "determinate" | "done" | "failed" | "cancelled";
 
 interface StoredLogEntry {
@@ -127,7 +181,7 @@ interface QueuedClip {
 }
 
 interface CaptionProjectSession {
-  version: 1;
+  version: 1 | 2;
   selectedVideoPath: string | null;
   audioPath: string | null;
   audioSourceKind: AudioSourceKind;
@@ -138,6 +192,12 @@ interface CaptionProjectSession {
   clipStart: string;
   clipEnd: string;
   clipMode: ClipMode;
+  audioProject?: EditorProject;
+  captionSource?: "original" | "edited";
+  captionSets?: EditorCaptionSet[];
+  activeCaptionSetId?: string | null;
+  audioSelection?: { start: number; end: number };
+  audioPlayhead?: number;
 }
 
 const logEntries: StoredLogEntry[] = [];
@@ -165,6 +225,32 @@ let currentPreviewKind: "video" | "audio" | null = null;
 let currentPreviewUrl: string | null = null;
 let captionProjectPersistenceReady = false;
 let captionProjectSaveTimer: number | null = null;
+let audioProject: EditorProject | null = null;
+let audioAnalysis: EditorAnalysis | null = null;
+let audioLoadState: "empty" | "loading" | "ready" | "error" = "empty";
+let audioLoadingPath: string | null = null;
+let audioLoadToken = 0;
+let audioEditorRegionStartSeconds = 0;
+let audioEditorRegionEndSeconds = 0;
+let audioEditorPlayhead = 0;
+let audioSelectedClipId: string | null = null;
+let audioUndoHistory: EditorHistoryEntry[] = [];
+let audioRedoHistory: EditorHistoryEntry[] = [];
+let audioPointerAnchor: number | null = null;
+let audioTimelineFrame: number | null = null;
+let audioObservedWidth = -1;
+let captionSets: EditorCaptionSet[] = [];
+let activeCaptionSetId: string | null = null;
+let captionSource: "original" | "edited" = "original";
+let audioPreviewOverride: { kind: "audio"; mediaPath: string; label: string; project: EditorProject } | null = null;
+let editorCancelRequested = false;
+let editorPipelineActive = false;
+let captionGenerationPending = false;
+let pendingRemap: { project: EditorProject; segments: CaptionSegment[]; warnings: string[] } | null = null;
+let pendingRestoredProject: EditorProject | null = null;
+let pendingRestoredSelection: { start: number; end: number } | null = null;
+let pendingRestoredPlayhead = 0;
+let projectSaveFailed = false;
 
 function isSupportedVideoPath(filePath: string): boolean {
   const extensionMatch = filePath.toLowerCase().match(/\.([^.\\/]+)$/);
@@ -191,14 +277,17 @@ function isM4aAudioPath(filePath: string): boolean {
 function setBusy(next: boolean): void {
   isBusy = next;
   syncButtons();
+  if (!next && getEditorSourcePath() && audioLoadingPath !== getEditorSourcePath()) {
+    void Promise.resolve().then(() => ensureAudioEditorSource());
+  }
 }
 
 function syncButtons(): void {
   extractAudioButton.disabled = isBusy || !selectedVideoPath;
-  generateCaptionsButton.disabled = isBusy || !audioPath;
+  generateCaptionsButton.disabled = isBusy || audioLoadState !== "ready" || !audioProject;
   saveAudioButton.disabled = isBusy || !audioPath || audioSourceKind !== "extracted";
-  saveSrtButton.disabled = isBusy || (!srtPath && captionSegments.length === 0);
-  saveVttButton.disabled = isBusy || (!vttPath && captionSegments.length === 0);
+  saveSrtButton.disabled = isBusy || (getActiveCaptionSet() ? captionSegments.length === 0 : !srtPath && captionSegments.length === 0);
+  saveVttButton.disabled = isBusy || (getActiveCaptionSet() ? captionSegments.length === 0 : !vttPath && captionSegments.length === 0);
   selectVideoButton.disabled = isBusy;
   selectAudioButton.disabled = isBusy;
 
@@ -208,6 +297,7 @@ function syncButtons(): void {
   cancelActionButton.hidden = !isBusy || activeAction === null;
   cancelActionButton.disabled = !isBusy || activeAction === null || isCancelling;
   cancelActionButton.textContent = isCancelling ? "Cancelling..." : "Cancel";
+  syncAudioEditorButtons();
 }
 
 const systemThemeMedia = window.matchMedia("(prefers-color-scheme: dark)");
@@ -217,6 +307,7 @@ function applyThemeMode(themeMode: ThemeMode): void {
   const resolvedTheme = themeMode === "system" ? (systemThemeMedia.matches ? "dark" : "light") : themeMode;
   document.documentElement.dataset.theme = resolvedTheme;
   document.documentElement.dataset.themeMode = themeMode;
+  drawAudioEditorTimeline();
 }
 
 function getDirectoryFromPath(filePath: string): string | null {
@@ -268,6 +359,7 @@ function getCaptionSourceStatus(): { label: string; state: string } {
 }
 
 function getPreviewSource(): { kind: "video" | "audio"; mediaPath: string } | null {
+  if (audioPreviewOverride) return audioPreviewOverride;
   if (audioSourceKind === "uploaded" && audioPath) {
     return { kind: "audio", mediaPath: audioPath };
   }
@@ -349,7 +441,7 @@ function updateMediaPreview(): void {
   const otherElement = source.kind === "video" ? previewAudioNode : previewVideoNode;
   const changed = currentPreviewKind !== source.kind || currentPreviewUrl !== nextUrl;
 
-  previewStatusNode.textContent = source.kind === "video" ? "Video preview ready" : "Audio preview ready";
+  previewStatusNode.textContent = audioPreviewOverride?.label ?? (source.kind === "video" ? "Original video" : "Original audio");
   previewEmptyNode.hidden = true;
   nextElement.hidden = false;
   otherElement.hidden = true;
@@ -397,6 +489,7 @@ function refreshPaths(): void {
   captionSourceStatusNode.textContent = sourceStatus.label;
   captionSourceStatusNode.dataset.state = sourceStatus.state;
   updateMediaPreview();
+  void ensureAudioEditorSource();
 }
 
 function showSessionNotice(title: string, detail: string, state: "restored" | "warning" | "reset"): void {
@@ -669,6 +762,11 @@ function setActivePlaybackSegmentForSeconds(seconds: number): void {
 }
 
 function seekMediaToTimestamp(timestamp: string): void {
+  const set = getActiveCaptionSet();
+  if (set && audioPreviewOverride?.mediaPath !== set.mediaPath) {
+    void playCaptionSet(set, timestampToSeconds(timestamp) ?? 0);
+    return;
+  }
   const seconds = timestampToSeconds(timestamp);
   const mediaElement = getActivePreviewElement();
 
@@ -693,7 +791,15 @@ function updateActivePlaybackSegmentFromMedia(): void {
     return;
   }
 
-  setActivePlaybackSegmentForSeconds(mediaElement.currentTime);
+  const set = getActiveCaptionSet();
+  if (!set || audioPreviewOverride?.mediaPath === set.mediaPath) {
+    setActivePlaybackSegmentForSeconds(mediaElement.currentTime);
+  } else {
+    clearActivePlaybackSegment();
+  }
+  if (audioPreviewOverride && audioProject && window.audioEditUtils.timelineMatches(audioPreviewOverride.project, audioProject)) {
+    setAudioPlayhead(mediaElement.currentTime, false);
+  }
 }
 
 function clearCaptionRangeSelection(): void {
@@ -720,8 +826,8 @@ function renderCaptionSelectionSummary(): void {
     detailNode.textContent = "Click a caption to choose the start.";
   } else if (!captionRangeComplete || !focusSegment) {
     captionSelectionSummaryNode.dataset.state = "pending";
-    titleNode.textContent = "Start selected — click another caption to choose the end.";
-    detailNode.textContent = `${anchorSegment.start} — ${getShortCaptionPreview(anchorSegment.text)}`;
+    titleNode.textContent = "Start selected - click another caption to choose the end.";
+    detailNode.textContent = `${anchorSegment.start} - ${getShortCaptionPreview(anchorSegment.text)}`;
   } else {
     const startSegment = anchorSegment.index <= focusSegment.index ? anchorSegment : focusSegment;
     const endSegment = anchorSegment.index <= focusSegment.index ? focusSegment : anchorSegment;
@@ -732,9 +838,27 @@ function renderCaptionSelectionSummary(): void {
 
   detailNode.title = detailNode.textContent;
   captionSelectionSummaryNode.append(titleNode, detailNode);
+  syncAudioEditorButtons();
 }
 
 function selectCaptionSegment(segment: CaptionSegment): void {
+  const set = getActiveCaptionSet();
+  if (set) {
+    const original = window.audioEditUtils.createProject({ ...set.project, peaks: [], previewPath: set.project.sourcePath });
+    if (set.project.sourcePath !== selectedVideoPath || !window.audioEditUtils.timelineMatches(set.project, original)) {
+      if (captionRangeAnchorIndex === null || captionRangeComplete) {
+        captionRangeAnchorIndex = segment.index;
+        captionRangeFocusIndex = segment.index;
+        captionRangeComplete = false;
+      } else {
+        captionRangeFocusIndex = segment.index;
+        captionRangeComplete = captionRangeAnchorIndex !== segment.index;
+      }
+      renderCaptionSegments();
+      syncAudioEditorButtons();
+      return;
+    }
+  }
   if (captionRangeAnchorIndex === null || captionRangeComplete) {
     captionRangeAnchorIndex = segment.index;
     captionRangeFocusIndex = segment.index;
@@ -796,6 +920,7 @@ function cancelCaptionEdit(): void {
   }
 
   editingCaptionIndex = null;
+  persistActiveCaptionSet();
   renderCaptionSegments();
 }
 
@@ -822,6 +947,10 @@ function saveCaptionEdit(index: number, text: string): void {
 function handleLiveWhisperCaptionLine(line: string): void {
   const segment = parseWhisperCaptionLine(line);
   if (!segment) {
+    return;
+  }
+  if (captionGenerationPending) {
+    updateCaptionProgressFromTimestamp(segment.end);
     return;
   }
 
@@ -929,6 +1058,7 @@ function getWorkflowNavTarget(button: HTMLButtonElement): WorkflowNavTarget | nu
     target === "source" ||
     target === "process" ||
     target === "clip" ||
+    target === "editor" ||
     target === "captions" ||
     target === "details" ||
     target === "log"
@@ -968,6 +1098,7 @@ function setWorkflowSection(section: WorkflowSection): void {
   }
 
   updateWorkflowNavigationState();
+  if (section === "editor") window.requestAnimationFrame(drawAudioEditorTimeline);
 }
 
 function activateWorkflowNavTarget(target: WorkflowNavTarget): void {
@@ -1145,7 +1276,7 @@ function renderCaptionSegments(): void {
   if (visibleSegments.length === 0) {
     appendCaptionEmptyState(
       "No matching captions",
-      `No captions match “${searchQuery}”. Clear or change the search to show the hidden captions.`
+      `No captions match "${searchQuery}". Clear or change the search to show the hidden captions.`
     );
     renderCaptionSelectionSummary();
     return;
@@ -1477,8 +1608,9 @@ function appendLog(message: string): void {
 }
 
 function getCaptionProjectSnapshot(): CaptionProjectSession {
+  persistActiveCaptionSet();
   return {
-    version: 1,
+    version: 2,
     selectedVideoPath,
     audioPath,
     audioSourceKind,
@@ -1488,7 +1620,13 @@ function getCaptionProjectSnapshot(): CaptionProjectSession {
     queuedClips: queuedClips.map((clip) => ({ ...clip })),
     clipStart: clipStartInput.value.trim(),
     clipEnd: clipEndInput.value.trim(),
-    clipMode: clipModeSelect.value === "encode" ? "encode" : "copy"
+    clipMode: clipModeSelect.value === "encode" ? "encode" : "copy",
+    ...((audioProject ?? pendingRestoredProject) ? { audioProject: window.audioEditUtils.cloneProject((audioProject ?? pendingRestoredProject)!) } : {}),
+    captionSource,
+    captionSets: captionSets.map((set) => ({ ...set, project: window.audioEditUtils.cloneProject(set.project), segments: set.segments.map((segment) => ({ ...segment })) })),
+    activeCaptionSetId,
+    audioSelection: audioProject ? { start: audioEditorRegionStartSeconds, end: audioEditorRegionEndSeconds } : pendingRestoredSelection ?? undefined,
+    audioPlayhead: audioProject ? audioEditorPlayhead : pendingRestoredPlayhead
   };
 }
 
@@ -1503,7 +1641,9 @@ function scheduleCaptionProjectSave(): void {
 
   captionProjectSaveTimer = window.setTimeout(() => {
     captionProjectSaveTimer = null;
-    void window.videoTools.setCaptionProject(getCaptionProjectSnapshot()).catch((error) => {
+    void window.videoTools.setCaptionProject(getCaptionProjectSnapshot()).then(() => { projectSaveFailed = false; }).catch((error) => {
+      projectSaveFailed = true;
+      setAudioEditorError("Your latest edits could not be saved. Keep this window open and retry before switching recordings.");
       appendLog(`Save caption project failed: ${(error as Error).message}`);
     });
   }, 250);
@@ -1516,7 +1656,7 @@ async function restoreCaptionProject(): Promise<void> {
 
   try {
     const session = await window.videoTools.getCaptionProject();
-    if (!session || session.version !== 1) {
+    if (!session || (session.version !== 1 && session.version !== 2)) {
       return;
     }
 
@@ -1539,6 +1679,17 @@ async function restoreCaptionProject(): Promise<void> {
     audioSourceKind = audioPath ? session.audioSourceKind : null;
     srtPath = await restoreExistingPath(session.srtPath, "SRT");
     vttPath = await restoreExistingPath(session.vttPath, "VTT");
+    captionSets = (session.captionSets ?? []).map((set) => ({ ...set, segments: set.segments.map((segment) => ({ ...segment })) }));
+    activeCaptionSetId = session.activeCaptionSetId ?? null;
+    captionSource = session.captionSource === "edited" ? "edited" : "original";
+    captionSourceOriginal.checked = captionSource === "original";
+    captionSourceEdited.checked = captionSource === "edited";
+    if (session.audioProject) {
+      try { pendingRestoredProject = window.audioEditUtils.validateProject(session.audioProject); }
+      catch (error) { appendLog(`Audio edit restoration skipped: ${(error as Error).message}`); }
+    }
+    pendingRestoredSelection = session.audioSelection ?? null;
+    pendingRestoredPlayhead = session.audioPlayhead ?? 0;
 
     const savedQueuedClips = Array.isArray(session.queuedClips) ? session.queuedClips : [];
     const restoredQueuedClips = await Promise.all(
@@ -1559,8 +1710,9 @@ async function restoreCaptionProject(): Promise<void> {
     clipModeSelect.value = session.clipMode === "encode" ? "encode" : "copy";
 
     setCaptionSegments(
-      Array.isArray(session.captionSegments) ? session.captionSegments.map((segment) => ({ ...segment })) : []
+      getActiveCaptionSet()?.segments.map((segment) => ({ ...segment })) ?? (Array.isArray(session.captionSegments) ? session.captionSegments.map((segment) => ({ ...segment })) : [])
     );
+    renderCaptionSets();
     refreshPaths();
     renderQueuedClips();
     syncButtons();
@@ -1659,6 +1811,10 @@ function appendSetupHintForMissingDependency(errorMessage: string): void {
 }
 
 function applySelectedVideo(videoPath: string): void {
+  if (!confirmAudioSourceReplacement(videoPath)) return;
+  resetCaptionSourceForNewRecording(videoPath);
+  detachCaptionSet();
+  audioPreviewOverride = null;
   const clearedPreviousWork =
     captionSegments.length > 0 || queuedClips.length > 0 || clipStartInput.value !== "" || clipEndInput.value !== "";
   selectedVideoPath = videoPath;
@@ -1676,8 +1832,8 @@ function applySelectedVideo(videoPath: string): void {
   showSessionNotice(
     "New video selected",
     clearedPreviousWork
-      ? "Previous captions, clip fields, and queued clips were cleared."
-      : "Extract audio to continue with caption generation.",
+      ? "Saved caption copies were kept. Video clip fields and queued clips were cleared."
+      : "Choose Original audio for captions, or open Audio Editor first.",
     "reset"
   );
   if (!activeAction) {
@@ -1688,6 +1844,10 @@ function applySelectedVideo(videoPath: string): void {
 }
 
 function applySelectedAudio(nextAudioPath: string): void {
+  if (!confirmAudioSourceReplacement(nextAudioPath)) return;
+  resetCaptionSourceForNewRecording(nextAudioPath);
+  detachCaptionSet();
+  audioPreviewOverride = null;
   const clearedPreviousWork =
     captionSegments.length > 0 || queuedClips.length > 0 || clipStartInput.value !== "" || clipEndInput.value !== "";
   audioPath = nextAudioPath;
@@ -1704,7 +1864,7 @@ function applySelectedAudio(nextAudioPath: string): void {
   showSessionNotice(
     "New audio selected",
     clearedPreviousWork
-      ? "Previous captions, clip fields, and queued clips were cleared."
+      ? "Saved caption copies were kept. Video clip fields and queued clips were cleared."
       : "Generate captions when you are ready.",
     "reset"
   );
@@ -1805,13 +1965,14 @@ cancelActionButton.addEventListener("click", async () => {
   }
 
   isCancelling = true;
+  editorCancelRequested = true;
   syncButtons();
   setActionStatus(activeAction.label, "Cancelling...", "indeterminate", 0);
   appendLog("Cancellation requested.");
 
   try {
     const cancelled = await window.videoTools.cancelActiveMediaProcess();
-    if (!cancelled) {
+    if (!cancelled && !editorPipelineActive) {
       appendLog("Cancellation skipped: no active media process.");
       isCancelling = false;
       if (activeAction) {
@@ -2254,7 +2415,7 @@ extractAudioButton.addEventListener("click", async () => {
     srtPath = null;
     vttPath = null;
     audioSourceKind = "extracted";
-    setCaptionSegments([]);
+    persistActiveCaptionSet();
 
     refreshPaths();
     syncButtons();
@@ -2288,46 +2449,7 @@ saveAudioButton.addEventListener("click", async () => {
   }
 });
 
-generateCaptionsButton.addEventListener("click", async () => {
-  if (!audioPath) {
-    return;
-  }
-
-  setBusy(true);
-  appendLog("Starting whisper caption generation...");
-  setCaptionSegments([]);
-  startActionStatus("caption", isM4aAudioPath(audioPath) ? "Converting audio..." : "Generating captions...");
-
-  try {
-    const result = await window.videoTools.runWhisper({
-      audioPath,
-      sourcePath: getCaptionContextPath()
-    });
-    srtPath = result.srtPath;
-    vttPath = result.vttPath;
-    setCaptionSegments(parseSrtDocument(result.srtText));
-
-    refreshPaths();
-    syncButtons();
-    appendLog(`Captions generated: ${srtPath}, ${vttPath}`);
-    appendLog("Use Save SRT or Save VTT to choose where to keep the generated captions.");
-    scheduleCaptionProjectSave();
-    completeActionStatus();
-  } catch (error) {
-    const message = (error as Error).message;
-    if (isMediaProcessCancellation(message)) {
-      appendLog("Caption generation cancelled.");
-      cancelActionStatus();
-      scheduleCaptionProjectSave();
-    } else {
-      appendLog(`Caption generation failed: ${message}`);
-      appendSetupHintForMissingDependency(message);
-      failActionStatus(message);
-    }
-  } finally {
-    setBusy(false);
-  }
-});
+generateCaptionsButton.addEventListener("click", () => { void generateAudioCaptions(); });
 
 saveSrtButton.addEventListener("click", async () => {
   if (!srtPath && captionSegments.length === 0) {
@@ -2414,3 +2536,753 @@ void Promise.all([initSettings(), restoreCaptionProject()]);
 
 
 
+
+// Audio editor: model-backed workflow.
+function formatEditorTimestamp(seconds: number): string {
+  const total = Math.round(Math.max(0, Number.isFinite(seconds) ? seconds : 0) * 1000);
+  return `${String(Math.floor(total / 3600000)).padStart(2, "0")}:${String(Math.floor(total / 60000) % 60).padStart(2, "0")}:${String(Math.floor(total / 1000) % 60).padStart(2, "0")}.${String(total % 1000).padStart(3, "0")}`;
+}
+
+function parseEditorTimestamp(value: string): number {
+  const match = value.trim().match(/^(\d+):([0-5]\d):([0-5]\d)(?:\.(\d{1,3}))?$/);
+  if (!match) throw new Error("Enter a time as hours:minutes:seconds.milliseconds, for example 00:01:25.500.");
+  return Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]) + Number((match[4] ?? "0").padEnd(3, "0")) / 1000;
+}
+
+function getEditorSourcePath(): string | null {
+  return audioSourceKind === "uploaded" ? audioPath : selectedVideoPath ?? audioPath;
+}
+
+function getActiveCaptionSet(): EditorCaptionSet | undefined {
+  return captionSets.find((set) => set.id === activeCaptionSetId);
+}
+
+function persistActiveCaptionSet(): void {
+  const set = getActiveCaptionSet();
+  if (set && !captionGenerationPending) set.segments = captionSegments.map((segment) => ({ ...segment }));
+}
+
+function detachCaptionSet(): void {
+  persistActiveCaptionSet();
+  activeCaptionSetId = null;
+  renderCaptionSets();
+}
+
+function confirmAudioSourceReplacement(path: string): boolean {
+  if (audioProject && audioProject.sourcePath !== path && (audioProject.revision > 0 || projectSaveFailed)) {
+    return window.confirm("Switch recording? The current audio edit will be replaced. Existing caption copies and their text corrections stay available.");
+  }
+  return true;
+}
+
+function resetCaptionSourceForNewRecording(path: string): void {
+  if ((audioProject ?? pendingRestoredProject)?.sourcePath === path) return;
+  captionSource = "original";
+  captionSourceOriginal.checked = true;
+  captionSourceEdited.checked = false;
+  if (pendingRestoredProject?.sourcePath !== path) pendingRestoredProject = null;
+}
+
+function setAudioEditorError(message: string): void {
+  audioEditorError.textContent = message;
+  audioEditorError.hidden = !message;
+  syncAudioEditorButtons();
+}
+
+function getEditorDuration(): number {
+  return audioProject ? window.audioEditUtils.getDuration(audioProject) : 0;
+}
+
+function hasAudioSelection(): boolean {
+  return audioEditorRegionEndSeconds > audioEditorRegionStartSeconds && audioEditorRegionEndSeconds <= getEditorDuration() + 0.001;
+}
+
+function syncAudioEditorButtons(): void {
+  const ready = audioLoadState === "ready" && audioProject !== null;
+  const locked = isBusy || !ready;
+  const invalid = audioEditorPanel.querySelector('[aria-invalid="true"]') !== null;
+  for (const control of Array.from(audioEditorPanel.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>("input, select, button"))) control.disabled = locked;
+  audioEditorRetry.disabled = isBusy;
+  audioEditUndoButton.disabled = locked || audioUndoHistory.length === 0;
+  audioEditRedoButton.disabled = locked || audioRedoHistory.length === 0;
+  audioEditResetButton.disabled = locked || audioProject?.revision === 0;
+  audioSplit.disabled = locked || audioEditorPlayhead <= 0 || audioEditorPlayhead >= getEditorDuration();
+  for (const control of [audioKeep, audioRemove, audioDuplicate]) control.disabled = locked || !hasAudioSelection();
+  audioRemove.disabled = audioRemove.disabled || (audioEditorRegionStartSeconds === 0 && audioEditorRegionEndSeconds >= getEditorDuration());
+  audioEditExportButton.disabled = locked || invalid || (audioExportScope.value === "selection" && !hasAudioSelection());
+  audioPreviewEdited.disabled = locked || invalid;
+  generateCaptionsButton.disabled = locked || (captionSource === "edited" && invalid);
+  audioClipSettings.disabled = locked || !audioProject?.clips.some((clip) => clip.id === audioSelectedClipId);
+  audioWaveformCanvas.setAttribute("aria-disabled", String(locked));
+  audioUseCaptionRange.disabled = locked || captionRangeAnchorIndex === null;
+  captionSetSelect.disabled = isBusy || captionSets.length === 0;
+  captionSourceOriginal.disabled = isBusy;
+  captionSourceEdited.disabled = isBusy || !ready;
+  const set = getActiveCaptionSet();
+  captionRemapButton.disabled = locked || !set || set.segments.length === 0 || set.project.sourceFingerprint !== audioProject?.sourceFingerprint;
+  captionSourceHelp.textContent = captionSource === "edited"
+    ? "Use the current cuts and sound adjustments. The app prepares the audio for you; existing captions are kept."
+    : "Use the recording as imported. Existing captions are kept.";
+}
+
+async function ensureAudioEditorSource(force = false): Promise<void> {
+  const sourcePath = getEditorSourcePath();
+  if (!sourcePath) {
+    if (audioLoadState !== "empty") {
+      audioLoadToken++;
+      audioProject = null;
+      audioAnalysis = null;
+      audioLoadingPath = null;
+      audioLoadState = "empty";
+      audioUndoHistory = [];
+      audioRedoHistory = [];
+      audioEditorStatus.textContent = "Choose a recording";
+      audioEditorStatus.dataset.state = "idle";
+      renderAudioEditor();
+    }
+    return;
+  }
+  if (isBusy || (!force && audioLoadingPath === sourcePath)) return;
+  const token = ++audioLoadToken;
+  audioLoadingPath = sourcePath;
+  audioLoadState = "loading";
+  audioEditorRetry.hidden = true;
+  audioEditorStatus.textContent = "Loading audio...";
+  audioEditorStatus.dataset.state = "idle";
+  audioEditorSource.textContent = getBaseNameFromPath(sourcePath);
+  setAudioEditorError("");
+  editorCancelRequested = false;
+  editorPipelineActive = true;
+  setBusy(true);
+  startActionStatus("editor", "Reading audio and waveform...");
+  try {
+    const analysis = await window.videoTools.analyzeAudio(sourcePath);
+    if (editorCancelRequested) throw new Error(MEDIA_PROCESS_CANCELLED_MESSAGE);
+    if (token !== audioLoadToken || sourcePath !== getEditorSourcePath()) return;
+    audioAnalysis = analysis;
+    const restored = pendingRestoredProject ?? (audioProject?.sourcePath === sourcePath ? audioProject : null);
+    if (restored && restored.sourcePath === sourcePath && restored.sourceFingerprint === analysis.sourceFingerprint) {
+      audioProject = window.audioEditUtils.validateProject(restored);
+    } else {
+      audioProject = window.audioEditUtils.createProject(analysis);
+      if (restored?.sourcePath === sourcePath) setAudioEditorError("This recording has changed. A fresh edit is open; earlier caption copies are kept and must be checked against their original recording.");
+    }
+    const restoredView = pendingRestoredProject?.sourceFingerprint === analysis.sourceFingerprint;
+    pendingRestoredProject = null;
+    audioUndoHistory = [];
+    audioRedoHistory = [];
+    audioSelectedClipId = audioProject.clips[0]?.id ?? null;
+    audioLoadState = "ready";
+    audioEditorStatus.textContent = "Ready";
+    audioEditorStatus.dataset.state = "ready";
+    updateAudioEditorRegion(restoredView ? pendingRestoredSelection?.start ?? 0 : 0, restoredView ? pendingRestoredSelection?.end ?? getEditorDuration() : getEditorDuration());
+    setAudioPlayhead(restoredView ? pendingRestoredPlayhead : 0, false);
+    pendingRestoredSelection = null;
+    pendingRestoredPlayhead = 0;
+    if (!activeCaptionSetId && captionSets.length === 0 && captionSegments.length > 0) {
+      addCaptionSet("Original audio  /  restored captions", "original", window.audioEditUtils.createProject(analysis), analysis.previewPath, captionSegments);
+    }
+    renderAudioEditor();
+    renderCaptionSets();
+    scheduleCaptionProjectSave();
+    completeActionStatus();
+  } catch (error) {
+    if (token !== audioLoadToken) return;
+    audioLoadState = "error";
+    audioEditorStatus.textContent = editorCancelRequested ? "Loading cancelled" : "Audio unavailable";
+    audioEditorStatus.dataset.state = "idle";
+    audioEditorRetry.hidden = false;
+    const message = (error as Error).message;
+    setAudioEditorError(editorCancelRequested || isMediaProcessCancellation(message) ? "Audio loading stopped. Retry when you are ready." : message);
+    if (editorCancelRequested || isMediaProcessCancellation(message)) cancelActionStatus(); else failActionStatus(message);
+  } finally {
+    editorPipelineActive = false;
+    setBusy(false);
+  }
+}
+
+function renderAudioEditor(): void {
+  const project = audioProject;
+  audioEditorSource.textContent = project
+    ? `${project.sourcePath.split(/[\\/]/).pop()}  /  ${project.sampleRate.toLocaleString()} Hz  /  ${project.channels === 1 ? "mono" : `${project.channels} channels`}  /  Original recording preserved`
+    : "Choose a video or audio recording to begin. Your original stays unchanged.";
+  audioEditorDuration.textContent = `Track length ${formatEditorTimestamp(getEditorDuration())}`;
+  audioClipList.replaceChildren();
+  if (project) {
+    for (const input of Array.from(audioEditorPanel.querySelectorAll("[aria-invalid]"))) input.removeAttribute("aria-invalid");
+    audioEditGain.value = String(project.effects.gainDb);
+    audioEditFadeIn.value = String(project.effects.fadeInSeconds);
+    audioEditFadeOut.value = String(project.effects.fadeOutSeconds);
+    audioEditSpeed.value = String(project.effects.speed);
+    audioEditPitch.value = String(project.effects.pitchSemitones);
+    audioEditNormalize.checked = project.effects.normalize;
+    audioEditNoise.checked = project.effects.noiseReduction;
+    if (!project.clips.some((clip) => clip.id === audioSelectedClipId)) audioSelectedClipId = project.clips[0]?.id ?? null;
+    window.audioEditUtils.getTimeline(project).forEach((entry, index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.clipId = entry.clipId;
+      button.textContent = `Clip ${index + 1}  /  ${formatEditorTimestamp(entry.start)}-${formatEditorTimestamp(entry.end)}`;
+      button.setAttribute("aria-pressed", String(entry.clipId === audioSelectedClipId));
+      button.addEventListener("click", () => {
+        audioSelectedClipId = entry.clipId;
+        updateAudioEditorRegion(entry.start, entry.end);
+        setAudioPlayhead(entry.start, false);
+        renderAudioEditor();
+      });
+      audioClipList.appendChild(button);
+    });
+    const selected = project.clips.find((clip) => clip.id === audioSelectedClipId);
+    audioClipGain.value = String(selected?.gainDb ?? 0);
+    audioClipFadeIn.value = String(selected?.fadeInSeconds ?? 0);
+    audioClipFadeOut.value = String(selected?.fadeOutSeconds ?? 0);
+  }
+  drawAudioEditorTimeline();
+  syncAudioEditorButtons();
+}
+
+function updateAudioEditorRegion(start: number, end: number): void {
+  const duration = getEditorDuration();
+  audioEditorRegionStartSeconds = Math.max(0, Math.min(start, end, duration));
+  audioEditorRegionEndSeconds = Math.max(0, Math.min(Math.max(start, end), duration));
+  audioEditStart.value = formatEditorTimestamp(audioEditorRegionStartSeconds);
+  audioEditEnd.value = formatEditorTimestamp(audioEditorRegionEndSeconds);
+  audioEditStart.removeAttribute("aria-invalid");
+  audioEditEnd.removeAttribute("aria-invalid");
+  audioEditorSelection.textContent = `Selection ${audioEditStart.value}-${audioEditEnd.value}`;
+  drawAudioEditorTimeline();
+  syncAudioEditorButtons();
+}
+
+function readAudioSelection(): [number, number] {
+  const start = parseEditorTimestamp(audioEditStart.value);
+  const end = parseEditorTimestamp(audioEditEnd.value);
+  const duration = getEditorDuration();
+  if (start < 0 || end <= start || end > duration + 0.001) throw new Error("Choose a selection that ends after it starts and stays within the track.");
+  return [Math.min(start, duration), Math.min(end, duration)];
+}
+
+function setAudioPlayhead(seconds: number, seek: boolean): void {
+  audioEditorPlayhead = Math.max(0, Math.min(seconds, getEditorDuration()));
+  audioPlayheadInput.removeAttribute("aria-invalid");
+  audioPlayheadInput.value = formatEditorTimestamp(audioEditorPlayhead);
+  audioWaveformCanvas.setAttribute("aria-valuemax", String(getEditorDuration()));
+  audioWaveformCanvas.setAttribute("aria-valuenow", String(audioEditorPlayhead));
+  audioWaveformCanvas.setAttribute("aria-valuetext", audioPlayheadInput.value);
+  if (seek && audioPreviewOverride && audioProject && window.audioEditUtils.timelineMatches(audioPreviewOverride.project, audioProject)) {
+    try { previewAudioNode.currentTime = audioEditorPlayhead; } catch { /* Metadata may still be loading. */ }
+  }
+  drawAudioEditorTimeline();
+  syncAudioEditorButtons();
+}
+
+function drawAudioEditorTimeline(): void {
+  const context = audioWaveformCanvas.getContext("2d");
+  if (!context || audioWaveformScroll.clientWidth === 0) return;
+  const width = Math.max(320, Math.round(audioWaveformScroll.clientWidth * Number(audioZoom.value || 1)));
+  if (audioWaveformCanvas.style.width !== `${width}px`) audioWaveformCanvas.style.width = `${width}px`;
+  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  const pixelWidth = Math.round(width * ratio);
+  const pixelHeight = Math.round(160 * ratio);
+  if (audioWaveformCanvas.width !== pixelWidth) audioWaveformCanvas.width = pixelWidth;
+  if (audioWaveformCanvas.height !== pixelHeight) audioWaveformCanvas.height = pixelHeight;
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  const style = getComputedStyle(document.documentElement);
+  context.fillStyle = style.getPropertyValue("--surface");
+  context.fillRect(0, 0, width, 160);
+  if (!audioProject || !audioAnalysis || !audioAnalysis.peaks.length || audioLoadState !== "ready") return;
+  const duration = getEditorDuration();
+  const timeline = window.audioEditUtils.getTimeline(audioProject);
+  context.strokeStyle = style.getPropertyValue("--primary");
+  context.lineWidth = 1;
+  context.beginPath();
+  let entryIndex = 0;
+  for (let x = 0; x < width; x += 2) {
+    const time = x / width * duration;
+    while (entryIndex < timeline.length - 1 && timeline[entryIndex].end <= time) entryIndex++;
+    const entry = timeline[entryIndex];
+    if (!entry) continue;
+    const sourceTime = entry.sourceStart + (time - entry.start) * audioProject.effects.speed;
+    const bin = Math.min(audioAnalysis.peaks.length - 1, Math.max(0, Math.floor(sourceTime / audioAnalysis.duration * audioAnalysis.peaks.length)));
+    const peak = Math.min(1, Math.max(0, audioAnalysis.peaks[bin])) * 55;
+    context.moveTo(x, 80 - peak);
+    context.lineTo(x, 80 + peak);
+  }
+  context.stroke();
+  context.globalAlpha = 0.22;
+  context.fillStyle = style.getPropertyValue("--primary");
+  context.fillRect(audioEditorRegionStartSeconds / duration * width, 0, (audioEditorRegionEndSeconds - audioEditorRegionStartSeconds) / duration * width, 160);
+  context.globalAlpha = 1;
+  context.fillStyle = style.getPropertyValue("--text");
+  context.font = "11px Segoe UI, sans-serif";
+  for (const entry of timeline) context.fillRect(entry.start / duration * width, 0, 1, 160);
+  const rulerStep = Math.max(1, Math.ceil(width / 180));
+  for (let i = 0; i <= rulerStep; i++) context.fillText(formatEditorTimestamp(duration * i / rulerStep), Math.min(width - 88, i / rulerStep * width + 4), 15);
+  context.fillStyle = style.getPropertyValue("--danger");
+  context.fillRect(audioEditorPlayhead / duration * width, 0, 2, 160);
+}
+
+function commitAudioProject(next: EditorProject, message: string): void {
+  if (!audioProject || isBusy) return;
+  const validated = window.audioEditUtils.validateProject(next);
+  if (JSON.stringify(validated) === JSON.stringify(audioProject)) return;
+  audioUndoHistory.push(captureEditorHistory());
+  if (audioUndoHistory.length > 100) audioUndoHistory.shift();
+  audioRedoHistory = [];
+  audioProject = validated;
+  invalidateEditedPreview();
+  updateAudioEditorRegion(Math.min(audioEditorRegionStartSeconds, getEditorDuration()), Math.min(audioEditorRegionEndSeconds, getEditorDuration()));
+  setAudioPlayhead(audioEditorPlayhead, false);
+  setAudioEditorError("");
+  audioEditorStatus.textContent = message;
+  renderAudioEditor();
+  renderCaptionSets();
+  scheduleCaptionProjectSave();
+}
+
+function captureEditorHistory(): EditorHistoryEntry {
+  return { project: window.audioEditUtils.cloneProject(audioProject!), start: audioEditorRegionStartSeconds, end: audioEditorRegionEndSeconds, playhead: audioEditorPlayhead, clipId: audioSelectedClipId };
+}
+
+function invalidateEditedPreview(): void {
+  if (audioPreviewOverride?.label === "Edited audio preview") {
+    previewAudioNode.pause();
+    audioPreviewOverride = null;
+    updateMediaPreview();
+  }
+}
+
+function applyAudioOperation(operation: "split" | "keep" | "remove" | "duplicate"): void {
+  if (!audioProject || isBusy) return;
+  try {
+    let next: EditorProject;
+    let selectionAfter: [number, number] | undefined;
+    let playheadAfter = audioEditorPlayhead;
+    if (operation === "split") next = window.audioEditUtils.splitAt(audioProject, audioEditorPlayhead);
+    else {
+      const [start, end] = readAudioSelection();
+      next = operation === "keep" ? window.audioEditUtils.keepSelection(audioProject, start, end)
+        : operation === "remove" ? window.audioEditUtils.removeSelection(audioProject, start, end)
+        : window.audioEditUtils.duplicateSelection(audioProject, start, end);
+      if (operation === "keep") {
+        selectionAfter = [0, end - start];
+        playheadAfter = Math.max(0, Math.min(audioEditorPlayhead - start, end - start));
+      } else if (operation === "remove") {
+        selectionAfter = [start, start];
+        playheadAfter = start;
+      } else {
+        selectionAfter = [end, end + end - start];
+        playheadAfter = end;
+      }
+    }
+    commitAudioProject(next, operation === "split" ? "Clip split; all audio kept" : operation === "remove" ? "Selection removed; gap closed" : operation === "keep" ? "Selection kept" : "Selection duplicated");
+    if (selectionAfter) {
+      updateAudioEditorRegion(...selectionAfter);
+      setAudioPlayhead(playheadAfter, false);
+      scheduleCaptionProjectSave();
+    }
+  } catch (error) { setAudioEditorError((error as Error).message); }
+}
+
+function readNumberInput(control: HTMLInputElement): number {
+  if (!control.value.trim() || !control.checkValidity() || !Number.isFinite(control.valueAsNumber)) {
+    control.setAttribute("aria-invalid", "true");
+    throw new Error(`Check ${control.parentElement?.textContent?.trim() ?? "the number"}. Enter a value within the displayed limits.`);
+  }
+  control.removeAttribute("aria-invalid");
+  return control.valueAsNumber;
+}
+
+function commitEffectControls(clipOnly = false, changedControl?: HTMLInputElement): void {
+  if (!audioProject || isBusy) return;
+  try {
+    if (clipOnly) {
+      const next = window.audioEditUtils.cloneProject(audioProject);
+      const clip = next.clips.find((item) => item.id === audioSelectedClipId);
+      if (!clip) return;
+      clip.gainDb = readNumberInput(audioClipGain);
+      clip.fadeInSeconds = readNumberInput(audioClipFadeIn);
+      clip.fadeOutSeconds = readNumberInput(audioClipFadeOut);
+      if (changedControl === audioClipFadeIn || changedControl === audioClipFadeOut) {
+        delete clip.effectSourceStart;
+        delete clip.effectSourceEnd;
+        const clipDuration = (clip.sourceEnd - clip.sourceStart) / next.effects.speed;
+        if (readNumberInput(changedControl) > clipDuration) throw new Error("A clip fade cannot be longer than the selected clip.");
+        clip.fadeInSeconds = Math.min(clip.fadeInSeconds, clipDuration);
+        clip.fadeOutSeconds = Math.min(clip.fadeOutSeconds, clipDuration);
+      }
+      next.revision++;
+      commitAudioProject(next, "Clip sound updated");
+    } else {
+      commitAudioProject(window.audioEditUtils.updateEffects(audioProject, {
+        gainDb: readNumberInput(audioEditGain), fadeInSeconds: readNumberInput(audioEditFadeIn), fadeOutSeconds: readNumberInput(audioEditFadeOut),
+        speed: readNumberInput(audioEditSpeed), pitchSemitones: readNumberInput(audioEditPitch),
+        normalize: audioEditNormalize.checked, noiseReduction: audioEditNoise.checked
+      }), "Track sound updated");
+    }
+  } catch (error) { changedControl?.setAttribute("aria-invalid", "true"); setAudioEditorError((error as Error).message); }
+}
+
+async function showAudioPlayback(path: string, label: string, project: EditorProject, time = 0, play = false): Promise<void> {
+  audioPreviewOverride = { kind: "audio", mediaPath: path, label, project: window.audioEditUtils.cloneProject(project) };
+  updateMediaPreview();
+  const url = filePathToFileUrl(path);
+  const apply = () => {
+    if (previewAudioNode.src !== url) return;
+    try { previewAudioNode.currentTime = Math.max(0, Math.min(time, Number.isFinite(previewAudioNode.duration) ? previewAudioNode.duration : time)); } catch { /* Native player still loading. */ }
+    if (play) void previewAudioNode.play().catch((error) => setAudioEditorError(`Playback could not start: ${(error as Error).message}`));
+  };
+  if (previewAudioNode.readyState >= 1) apply();
+  else previewAudioNode.addEventListener("loadedmetadata", apply, { once: true });
+}
+
+async function runAudioRender(purpose: "preview" | "export"): Promise<void> {
+  if (!audioProject || isBusy) return;
+  try {
+    let project = window.audioEditUtils.cloneProject(audioProject);
+    if (purpose === "export" && audioExportScope.value === "selection") {
+      const [start, end] = readAudioSelection();
+      project = window.audioEditUtils.keepSelection(project, start, end);
+    }
+    editorCancelRequested = false;
+    editorPipelineActive = true;
+    setBusy(true);
+    startActionStatus("editor", purpose === "preview" ? "Preparing edited preview..." : "Exporting audio...", window.audioEditUtils.getDuration(project));
+    const result = await window.videoTools.renderEditedAudio({ project, format: purpose === "preview" ? "wav" : audioEditFormat.value as "wav" | "mp3" | "flac", purpose });
+    if (editorCancelRequested) throw new Error(MEDIA_PROCESS_CANCELLED_MESSAGE);
+    if (!result) { cancelActionStatus("No audio file was saved", "Save cancelled"); return; }
+    if (purpose === "preview") {
+      await showAudioPlayback(result.outputPath, "Edited audio preview", project, audioEditorPlayhead, true);
+      audioEditorStatus.textContent = "Edited preview ready";
+    } else {
+      appendLog(`Edited audio saved: ${result.outputPath}`);
+      audioEditorStatus.textContent = "Audio saved";
+      audioEditorSource.textContent = `Saved: ${result.outputPath}`;
+    }
+    completeActionStatus();
+  } catch (error) {
+    const message = (error as Error).message;
+    if (editorCancelRequested || isMediaProcessCancellation(message)) cancelActionStatus();
+    else { setAudioEditorError(message); failActionStatus(message); }
+  } finally {
+    editorPipelineActive = false;
+    setBusy(false);
+  }
+}
+
+function addCaptionSet(label: string, sourceKind: "original" | "edited", project: EditorProject, mediaPath: string, segments: CaptionSegment[]): void {
+  persistActiveCaptionSet();
+  const set: EditorCaptionSet = {
+    id: `captions-${Date.now()}-${captionSets.length}`, label, sourceKind,
+    project: window.audioEditUtils.cloneProject(project), mediaPath,
+    segments: segments.map((segment) => ({ ...segment }))
+  };
+  captionSets.push(set);
+  activeCaptionSetId = set.id;
+  captionSegments = set.segments.map((segment) => ({ ...segment }));
+  captionRangeAnchorIndex = null;
+  captionRangeFocusIndex = null;
+  captionRangeComplete = false;
+  editingCaptionIndex = null;
+  renderCaptionSegments();
+  renderCaptionSets();
+  scheduleCaptionProjectSave();
+}
+
+function renderCaptionSets(): void {
+  captionSetSelect.replaceChildren();
+  if (!captionSets.length) {
+    const option = document.createElement("option");
+    option.textContent = "No caption sets yet";
+    captionSetSelect.appendChild(option);
+  } else {
+    if (!activeCaptionSetId) {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = "Choose a saved caption set";
+      captionSetSelect.appendChild(option);
+    }
+    for (const set of captionSets) {
+      const option = document.createElement("option");
+      option.value = set.id;
+      option.textContent = set.label;
+      captionSetSelect.appendChild(option);
+    }
+    captionSetSelect.value = activeCaptionSetId ?? "";
+  }
+  const set = getActiveCaptionSet();
+  let notice = "";
+  if (set && audioProject) {
+    if (set.project.sourceFingerprint !== audioProject.sourceFingerprint) notice = "These captions belong to another recording. Caption playback uses that recording; your current audio edit is unchanged.";
+    else if (!window.audioEditUtils.timelineMatches(set.project, audioProject)) notice = set.sourceKind === "original"
+      ? "These captions use original-audio timing. Choose Edited audio to create new captions, or adjust timing to create a separate copy."
+      : "These captions use an earlier audio edit. Generate new captions or adjust timing to create a separate copy.";
+  }
+  captionTimingNotice.textContent = notice;
+  captionTimingNotice.hidden = !notice;
+  syncAudioEditorButtons();
+}
+
+async function playCaptionSet(set: EditorCaptionSet, time = 0): Promise<void> {
+  if (isBusy) return;
+  let ownsJob = false;
+  try {
+    if (!(await window.videoTools.knownPathExists(set.mediaPath))) {
+      if (isBusy) return;
+      editorCancelRequested = false;
+      editorPipelineActive = true;
+      ownsJob = true;
+      setBusy(true);
+      startActionStatus("editor", "Restoring caption audio...");
+      const result = await window.videoTools.renderEditedAudio({ project: set.project, format: "wav", purpose: "preview" });
+      if (editorCancelRequested) throw new Error(MEDIA_PROCESS_CANCELLED_MESSAGE);
+      if (!result) throw new Error("Caption audio is unavailable. Reselect the original recording to recover it.");
+      set.mediaPath = result.outputPath;
+      scheduleCaptionProjectSave();
+    }
+    if (activeCaptionSetId !== set.id) return;
+    await showAudioPlayback(set.mediaPath, `${set.sourceKind === "original" ? "Original" : "Edited"} audio for these captions`, set.project, time);
+    if (ownsJob) completeActionStatus();
+  } catch (error) {
+    const message = (error as Error).message;
+    captionTimingNotice.textContent = `Caption playback unavailable: ${message}. Your captions are still kept.`;
+    captionTimingNotice.hidden = false;
+    if (ownsJob) {
+      if (editorCancelRequested || isMediaProcessCancellation(message)) cancelActionStatus(); else failActionStatus(message);
+    }
+  } finally {
+    if (ownsJob) { editorPipelineActive = false; setBusy(false); }
+  }
+}
+
+async function generateAudioCaptions(): Promise<void> {
+  if (!audioProject || !audioAnalysis || isBusy) return;
+  persistActiveCaptionSet();
+  const project = captionSource === "edited" ? window.audioEditUtils.cloneProject(audioProject) : window.audioEditUtils.createProject(audioAnalysis);
+  const sourceKind = captionSource;
+  editorCancelRequested = false;
+  editorPipelineActive = true;
+  captionGenerationPending = true;
+  setBusy(true);
+  startActionStatus("caption", sourceKind === "edited" ? "Preparing edited audio for captions..." : "Preparing original audio for captions...");
+  try {
+    const render = await window.videoTools.renderEditedAudio({ project, format: "wav", purpose: "caption" });
+    if (editorCancelRequested) throw new Error(MEDIA_PROCESS_CANCELLED_MESSAGE);
+    if (!render) throw new Error("Audio preparation did not complete.");
+    setActiveActionStage("Generating captions...", render.duration);
+    const result = await window.videoTools.runWhisper({ audioPath: render.outputPath, sourcePath: project.sourcePath });
+    if (editorCancelRequested) throw new Error(MEDIA_PROCESS_CANCELLED_MESSAGE);
+    srtPath = result.srtPath;
+    vttPath = result.vttPath;
+    captionGenerationPending = false;
+    const number = captionSets.filter((set) => set.sourceKind === sourceKind).length + 1;
+    addCaptionSet(`${sourceKind === "original" ? "Original audio" : "Edited audio"}  /  captions ${number}`, sourceKind, project, render.outputPath, parseSrtDocument(result.srtText));
+    await showAudioPlayback(render.outputPath, `${sourceKind === "original" ? "Original" : "Edited"} audio for these captions`, project);
+    setWorkflowSection("captions");
+    appendLog("New captions created. Earlier caption sets and manual corrections were kept.");
+    completeActionStatus();
+  } catch (error) {
+    const message = (error as Error).message;
+    if (editorCancelRequested || isMediaProcessCancellation(message)) cancelActionStatus("Existing captions and audio edits were kept");
+    else { appendLog(`Caption generation failed: ${message}`); appendSetupHintForMissingDependency(message); failActionStatus(message); }
+  } finally {
+    captionGenerationPending = false;
+    editorPipelineActive = false;
+    setBusy(false);
+    scheduleCaptionProjectSave();
+  }
+}
+
+function openCaptionRemap(): void {
+  const set = getActiveCaptionSet();
+  if (!set || !audioProject || isBusy) return;
+  persistActiveCaptionSet();
+  try {
+    const result = window.audioEditUtils.remapCaptions(set.project, audioProject, set.segments);
+    pendingRemap = { project: window.audioEditUtils.cloneProject(audioProject), segments: result.segments, warnings: result.warnings };
+    captionRemapChanges.replaceChildren();
+    const changed = result.changes.filter((change) => change.kind !== "unchanged");
+    const review = result.changes.some((change) => change.kind === "review" || change.kind === "removed" || change.kind === "duplicated") || result.warnings.length > 0;
+    captionRemapSummary.textContent = `${changed.length} caption ${changed.length === 1 ? "change" : "changes"}. ${result.segments.length} ${result.segments.length === 1 ? "caption" : "captions"} in the new copy.${result.warnings.length ? ` ${result.warnings.join(" ")}` : " Original text corrections will be preserved."}`;
+    for (const change of result.changes) {
+      const original = set.segments.find((segment) => segment.index === change.originalIndex);
+      const row = document.createElement("div");
+      row.className = "caption-remap-change";
+      row.dataset.review = String(["review", "removed", "duplicated"].includes(change.kind));
+      const title = document.createElement("strong");
+      title.textContent = `${change.kind === "review" ? "Needs review" : change.kind.charAt(0).toUpperCase() + change.kind.slice(1)}  /  Caption ${change.originalIndex}`;
+      const before = document.createElement("p");
+      before.textContent = `Before: ${original?.start ?? ""}-${original?.end ?? ""}  /  ${original?.text ?? ""}`;
+      const after = document.createElement("p");
+      after.textContent = change.outputs.length ? `After: ${change.outputs.map((segment) => `${segment.start}-${segment.end}`).join("; ")}` : "After: outside the kept audio; omitted from this copy only.";
+      const note = document.createElement("p");
+      note.textContent = change.message;
+      row.append(title, before, after, note);
+      captionRemapChanges.appendChild(row);
+    }
+    captionRemapReview.hidden = !review;
+    captionRemapCreate.disabled = result.segments.length === 0;
+    captionRemapDialog.showModal();
+    captionRemapCancel.focus();
+  } catch (error) { setAudioEditorError((error as Error).message); setWorkflowSection("editor"); }
+}
+
+async function createRemappedCaptionCopy(): Promise<void> {
+  if (!pendingRemap || captionRemapCreate.disabled || isBusy) return;
+  const pending = pendingRemap;
+  captionRemapDialog.close();
+  pendingRemap = null;
+  editorCancelRequested = false;
+  editorPipelineActive = true;
+  setBusy(true);
+  startActionStatus("editor", "Preparing audio for the caption copy...");
+  try {
+    const result = await window.videoTools.renderEditedAudio({ project: pending.project, format: "wav", purpose: "preview" });
+    if (editorCancelRequested) throw new Error(MEDIA_PROCESS_CANCELLED_MESSAGE);
+    if (!result) throw new Error("Audio preparation did not complete.");
+    addCaptionSet(`Edited audio  /  adjusted copy ${captionSets.length + 1}`, "edited", pending.project, result.outputPath, pending.segments);
+    await showAudioPlayback(result.outputPath, "Edited audio for these captions", pending.project);
+    if (pending.warnings.length) {
+      captionTimingNotice.textContent = "Adjusted caption copy created. Review captions flagged in the timing preview before saving subtitles.";
+      captionTimingNotice.hidden = false;
+    }
+    completeActionStatus();
+  } catch (error) {
+    const message = (error as Error).message;
+    if (editorCancelRequested || isMediaProcessCancellation(message)) cancelActionStatus(); else failActionStatus(message);
+  } finally { editorPipelineActive = false; setBusy(false); captionRemapButton.focus(); }
+}
+
+function useCaptionRangeForAudio(): void {
+  if (!audioProject || captionRangeAnchorIndex === null) return;
+  const set = getActiveCaptionSet();
+  if (set && !window.audioEditUtils.timelineMatches(set.project, audioProject)) {
+    setAudioEditorError("These captions use a different timeline. Generate captions for this edit or create an adjusted timing copy first.");
+    return;
+  }
+  const anchor = findCaptionSegment(captionRangeAnchorIndex);
+  const focus = findCaptionSegment(captionRangeFocusIndex) ?? anchor;
+  if (!anchor || !focus) return;
+  const start = Math.min(timestampToSeconds(anchor.start) ?? 0, timestampToSeconds(focus.start) ?? 0);
+  const end = Math.max(timestampToSeconds(anchor.end) ?? 0, timestampToSeconds(focus.end) ?? 0);
+  updateAudioEditorRegion(start, end);
+  setAudioPlayhead(start, false);
+  setAudioEditorError("");
+}
+
+for (const control of [audioEditStart, audioEditEnd]) {
+  control.addEventListener("change", () => {
+    try { const [start, end] = readAudioSelection(); updateAudioEditorRegion(start, end); setAudioEditorError(""); scheduleCaptionProjectSave(); }
+    catch (error) { control.setAttribute("aria-invalid", "true"); setAudioEditorError((error as Error).message); }
+  });
+}
+audioPlayheadInput.addEventListener("change", () => {
+  try {
+    const time = parseEditorTimestamp(audioPlayheadInput.value);
+    if (time > getEditorDuration() + 0.001) throw new Error("The playhead must stay within the track.");
+    setAudioPlayhead(time, true);
+    setAudioEditorError("");
+    scheduleCaptionProjectSave();
+  } catch (error) { audioPlayheadInput.setAttribute("aria-invalid", "true"); setAudioEditorError((error as Error).message); }
+});
+audioWaveformCanvas.addEventListener("pointerdown", (event) => {
+  if (isBusy || audioLoadState !== "ready") return;
+  audioWaveformCanvas.focus();
+  const rect = audioWaveformCanvas.getBoundingClientRect();
+  audioPointerAnchor = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) * getEditorDuration();
+  updateAudioEditorRegion(audioPointerAnchor, audioPointerAnchor);
+  setAudioPlayhead(audioPointerAnchor, true);
+  audioWaveformCanvas.setPointerCapture(event.pointerId);
+});
+audioWaveformCanvas.addEventListener("pointermove", (event) => {
+  if (audioPointerAnchor === null) return;
+  const rect = audioWaveformCanvas.getBoundingClientRect();
+  const time = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) * getEditorDuration();
+  updateAudioEditorRegion(audioPointerAnchor, time);
+});
+for (const name of ["pointerup", "pointercancel", "lostpointercapture"]) {
+  audioWaveformCanvas.addEventListener(name, () => { audioPointerAnchor = null; scheduleCaptionProjectSave(); });
+}
+audioWaveformCanvas.addEventListener("keydown", (event) => {
+  if (isBusy || audioLoadState !== "ready") return;
+  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  event.preventDefault();
+  const next = event.key === "Home" ? 0 : event.key === "End" ? getEditorDuration() : audioEditorPlayhead + (event.key === "ArrowRight" ? 1 : -1) * (event.shiftKey ? 1 : 0.1);
+  setAudioPlayhead(next, true);
+  scheduleCaptionProjectSave();
+});
+audioZoom.addEventListener("change", drawAudioEditorTimeline);
+for (const control of [audioEditGain, audioEditFadeIn, audioEditFadeOut, audioEditSpeed, audioEditPitch, audioEditNormalize, audioEditNoise]) control.addEventListener("change", () => commitEffectControls(false, control));
+for (const control of [audioClipGain, audioClipFadeIn, audioClipFadeOut]) control.addEventListener("change", () => commitEffectControls(true, control));
+audioSplit.addEventListener("click", () => applyAudioOperation("split"));
+audioKeep.addEventListener("click", () => applyAudioOperation("keep"));
+audioRemove.addEventListener("click", () => applyAudioOperation("remove"));
+audioDuplicate.addEventListener("click", () => applyAudioOperation("duplicate"));
+audioUseCaptionRange.addEventListener("click", useCaptionRangeForAudio);
+audioEditorRetry.addEventListener("click", () => { void ensureAudioEditorSource(true); });
+audioPreviewEdited.addEventListener("click", () => { void runAudioRender("preview"); });
+audioPlayOriginal.addEventListener("click", () => {
+  if (audioAnalysis) void showAudioPlayback(audioAnalysis.previewPath, "Original audio", window.audioEditUtils.createProject(audioAnalysis), 0, true);
+});
+audioEditExportButton.addEventListener("click", () => { void runAudioRender("export"); });
+audioExportScope.addEventListener("change", syncAudioEditorButtons);
+audioEditResetButton.addEventListener("click", () => {
+  if (!audioAnalysis || !audioProject || isBusy) return;
+  const reset = window.audioEditUtils.createProject(audioAnalysis);
+  reset.revision = audioProject.revision + 1;
+  commitAudioProject(reset, "Audio edits reset  /  Undo is available");
+  updateAudioEditorRegion(0, getEditorDuration());
+});
+function restoreAudioHistory(redo: boolean): void {
+  if (!audioProject || isBusy) return;
+  const from = redo ? audioRedoHistory : audioUndoHistory;
+  const to = redo ? audioUndoHistory : audioRedoHistory;
+  const next = from.pop();
+  if (!next) return;
+  to.push(captureEditorHistory());
+  audioProject = next.project;
+  audioSelectedClipId = next.clipId;
+  invalidateEditedPreview();
+  updateAudioEditorRegion(next.start, next.end);
+  setAudioPlayhead(next.playhead, false);
+  renderAudioEditor();
+  renderCaptionSets();
+  setAudioEditorError("");
+  audioEditorStatus.textContent = redo ? "Edit restored" : "Edit undone";
+  scheduleCaptionProjectSave();
+}
+audioEditUndoButton.addEventListener("click", () => restoreAudioHistory(false));
+audioEditRedoButton.addEventListener("click", () => restoreAudioHistory(true));
+for (const radio of [captionSourceOriginal, captionSourceEdited]) radio.addEventListener("change", () => {
+  captionSource = captionSourceEdited.checked ? "edited" : "original";
+  syncAudioEditorButtons();
+  scheduleCaptionProjectSave();
+});
+captionSetSelect.addEventListener("change", () => {
+  persistActiveCaptionSet();
+  activeCaptionSetId = captionSetSelect.value || null;
+  const set = getActiveCaptionSet();
+  setCaptionSegments(set?.segments.map((segment) => ({ ...segment })) ?? []);
+  renderCaptionSets();
+  if (set) void playCaptionSet(set);
+});
+captionRemapButton.addEventListener("click", openCaptionRemap);
+captionRemapCancel.addEventListener("click", () => { pendingRemap = null; captionRemapDialog.close(); captionRemapButton.focus(); });
+captionRemapDialog.addEventListener("cancel", () => { pendingRemap = null; });
+captionRemapDialog.addEventListener("close", () => captionRemapButton.focus());
+captionRemapCreate.addEventListener("click", () => { void createRemappedCaptionCopy(); });
+previewAudioNode.addEventListener("error", () => {
+  if (audioPreviewOverride) setAudioEditorError("This audio preview could not be played. Prepare the preview again or check that the recording is still available.");
+});
+const audioEditorObserver = new ResizeObserver((entries) => {
+  const width = entries[0]?.contentRect.width ?? 0;
+  if (width === audioObservedWidth) return;
+  audioObservedWidth = width;
+  if (audioTimelineFrame !== null) return;
+  audioTimelineFrame = window.requestAnimationFrame(() => {
+    audioTimelineFrame = null;
+    drawAudioEditorTimeline();
+  });
+});
+audioEditorObserver.observe(audioWaveformScroll);
+renderAudioEditor();

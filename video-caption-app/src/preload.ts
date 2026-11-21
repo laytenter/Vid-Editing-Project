@@ -1,6 +1,11 @@
-﻿import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer } from "electron";
 import type {
   AppSettings,
+  AudioEditRequest,
+  AudioEditResult,
+  AudioAnalysis,
+  AudioRenderRequest,
+  AudioRenderResult,
   CaptionProjectSession,
   ClipVideoRequest,
   ClipVideoResult,
@@ -57,6 +62,15 @@ const videoToolsApi = {
   },
   clipVideo: (request: ClipVideoRequest): Promise<ClipVideoResult> => {
     return ipcRenderer.invoke("clip-video", request);
+  },
+  exportEditedAudio: (request: AudioEditRequest): Promise<AudioEditResult> => {
+    return ipcRenderer.invoke("export-edited-audio", request);
+  },
+  analyzeAudio: (sourcePath: string): Promise<AudioAnalysis> => {
+    return ipcRenderer.invoke("analyze-audio", sourcePath);
+  },
+  renderEditedAudio: (request: AudioRenderRequest): Promise<AudioRenderResult | null> => {
+    return ipcRenderer.invoke("render-edited-audio", request);
   },
   onMenuOpenVideo: (callback: (videoPath: string) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, videoPath: unknown) => {

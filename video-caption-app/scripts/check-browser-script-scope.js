@@ -3,7 +3,7 @@ const path = require("path");
 const vm = require("vm");
 
 const distDir = path.resolve(__dirname, "..", "dist");
-const scriptNames = ["timestamp-utils.js", "subtitle-utils.js", "renderer.js"];
+const scriptNames = ["timestamp-utils.js", "subtitle-utils.js", "audio-edit-utils.js", "renderer.js"];
 const leakedUtilityNames = [
   "parseTimestampSeconds",
   "normalizeCaptionTime",
@@ -45,7 +45,7 @@ for (const scriptName of scriptNames) {
   }
 }
 
-for (const namespace of ["timestampUtils", "subtitleUtils"]) {
+for (const namespace of ["timestampUtils", "subtitleUtils", "audioEditUtils"]) {
   if (!context[namespace] || typeof context[namespace] !== "object") {
     throw new Error(`Missing browser utility namespace: ${namespace}`);
   }

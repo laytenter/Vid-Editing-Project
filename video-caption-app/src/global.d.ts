@@ -1,12 +1,14 @@
 import type { VideoToolsApi } from "./preload";
 import type { SubtitleUtils } from "./subtitle-utils";
 import type { TimestampUtils } from "./timestamp-utils";
+import type { AudioEditUtils } from "./audio-edit-utils";
 
 declare global {
   interface Window {
     videoTools: VideoToolsApi;
     subtitleUtils: SubtitleUtils;
     timestampUtils: TimestampUtils;
+    audioEditUtils: AudioEditUtils;
   }
 }
 

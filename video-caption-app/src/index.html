@@ -27,6 +27,7 @@
     <button class="workflow-nav-button" type="button" data-workflow-target="source" aria-pressed="false">Source</button>
     <button class="workflow-nav-button" type="button" data-workflow-target="process" aria-pressed="false">Process</button>
     <button class="workflow-nav-button" type="button" data-workflow-target="clip" aria-pressed="false">Clip</button>
+    <button class="workflow-nav-button" type="button" data-workflow-target="editor" aria-pressed="false">Audio Editor</button>
     <button class="workflow-nav-button" type="button" data-workflow-target="captions" aria-pressed="true">Captions</button>
     <button class="workflow-nav-button" type="button" data-workflow-target="details" aria-pressed="false" aria-controls="detailsDrawer">Details</button>
     <button class="workflow-nav-button" type="button" data-workflow-target="log" aria-pressed="false" aria-controls="logDrawer">Log</button>
@@ -38,7 +39,7 @@
       <div>
         <p class="eyebrow section-eyebrow">Media Source</p>
         <h2 class="section-title">Start from video or skip straight to audio</h2>
-        <p class="section-copy">Upload a video if you want to extract audio and create clips, or upload an existing audio file when you only need captions.</p>
+        <p class="section-copy">Choose a video or audio recording. Keep the original, edit its audio, or go straight to captions.</p>
       </div>
       <span id="captionSourceStatus" class="status-pill" data-state="idle">No source selected</span>
     </div>
@@ -57,6 +58,12 @@
       </div>
       <div class="source-action-group" data-workflow-panel="process">
         <span class="source-action-label">2. Process source</span>
+        <fieldset class="caption-source-choice">
+          <legend>Generate captions from</legend>
+          <label><input type="radio" name="captionSource" id="captionSourceOriginal" value="original" checked /> Original audio</label>
+          <label><input type="radio" name="captionSource" id="captionSourceEdited" value="edited" /> Edited audio</label>
+          <p id="captionSourceHelp" class="section-copy">Use the recording as imported. Existing captions are kept.</p>
+        </fieldset>
         <div class="source-action-buttons">
           <button id="extractAudioButton" disabled>Extract Audio</button>
           <button id="generateCaptionsButton" disabled>Generate Captions</button>
@@ -109,7 +116,92 @@
     <p id="previewEmpty" class="preview-empty">Select video or audio to preview.</p>
   </section>
 
+  <section id="audioEditorPanel" class="paths workspace-card audio-editor-card" data-workflow-panel="editor">
+    <div class="audio-editor-header">
+      <div>
+        <p class="eyebrow section-eyebrow">Audio Editor</p>
+        <h2 class="section-title">Edit one audio track</h2>
+      </div>
+      <span id="audioEditorStatus" class="status-pill" data-state="idle" role="status">Choose a recording</span>
+    </div>
+    <p id="audioEditorSource" class="section-copy">Your original recording stays unchanged.</p>
+    <p id="audioEditorError" class="audio-editor-error" role="alert" hidden></p>
+    <button id="audioEditorRetry" type="button" hidden>Retry loading audio</button>
+    <div class="audio-editor-toolbar">
+      <button id="audioPlayOriginal" type="button" disabled>Play original</button>
+      <button id="audioPreviewEdited" type="button" disabled>Preview edited audio</button>
+      <label for="audioZoom">Zoom <select id="audioZoom"><option value="1">Fit track</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option><option value="16">16×</option></select></label>
+    </div>
+    <div id="audioWaveformScroll" class="audio-waveform-scroll">
+      <canvas id="audioWaveformCanvas" class="audio-waveform-canvas" width="900" height="160" role="slider" tabindex="0" aria-label="Edited audio playhead" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-describedby="audioTimelineHelp"></canvas>
+    </div>
+    <p id="audioTimelineHelp" class="section-copy">Drag to select a section, or enter start and end times. Arrow keys move the playhead; Shift + arrow moves by one second. The waveform follows your cuts; preview to hear sound adjustments.</p>
+    <div class="audio-editor-timebar">
+      <span id="audioEditorSelection">No region selected</span>
+      <span id="audioEditorDuration">0:00.000</span>
+    </div>
+    <div class="audio-editor-controls audio-selection-controls">
+      <label>Selection start <input id="audioEditStart" value="00:00:00.000" aria-describedby="audioTimeHelp" /></label>
+      <label>Selection end <input id="audioEditEnd" value="00:00:00.000" aria-describedby="audioTimeHelp" /></label>
+      <label>Playhead <input id="audioPlayhead" value="00:00:00.000" aria-describedby="audioTimeHelp" /></label>
+    </div>
+    <p id="audioTimeHelp" class="section-copy">Times use hours:minutes:seconds.milliseconds on the edited track.</p>
+    <div class="audio-editor-toolbar">
+      <button id="audioSplit" type="button" disabled>Split at playhead</button>
+      <button id="audioKeep" type="button" disabled>Keep selection only</button>
+      <button id="audioRemove" type="button" disabled>Remove selection</button>
+      <button id="audioDuplicate" type="button" disabled>Duplicate selection</button>
+      <button id="audioUseCaptionRange" type="button" disabled>Use caption range</button>
+    </div>
+    <p class="section-copy">Removing a section closes the gap. Split clips stay on this track; additional tracks come later.</p>
+    <div id="audioClipList" class="audio-clip-list" aria-label="Clips on track 1"></div>
+    <fieldset id="audioClipSettings" class="audio-settings">
+      <legend>Selected clip</legend>
+      <div class="audio-editor-controls">
+        <label>Gain (dB) <input id="audioClipGain" type="number" min="-24" max="24" step="0.5" value="0" /></label>
+        <label>Fade in (seconds) <input id="audioClipFadeIn" type="number" min="0" max="30" step="0.1" value="0" /></label>
+        <label>Fade out (seconds) <input id="audioClipFadeOut" type="number" min="0" max="30" step="0.1" value="0" /></label>
+      </div>
+    </fieldset>
+    <details class="audio-settings" open>
+      <summary>Whole track sound</summary>
+      <div class="audio-editor-controls">
+        <label>Gain (dB) <input id="audioEditGain" type="number" min="-24" max="24" step="0.5" value="0" /></label>
+        <label>Fade in (seconds) <input id="audioEditFadeIn" type="number" min="0" max="30" step="0.1" value="0" /></label>
+        <label>Fade out (seconds) <input id="audioEditFadeOut" type="number" min="0" max="30" step="0.1" value="0" /></label>
+        <label>Speed (×) <input id="audioEditSpeed" type="number" min="0.5" max="2" step="0.05" value="1" /></label>
+        <label>Pitch (semitones) <input id="audioEditPitch" type="number" min="-12" max="12" step="1" value="0" /></label>
+        <label class="audio-editor-check"><input id="audioEditNormalize" type="checkbox" /> Normalize loudness</label>
+        <label class="audio-editor-check"><input id="audioEditNoise" type="checkbox" /> Reduce steady noise</label>
+      </div>
+      <p class="section-copy">Preview to hear changes. Loudness normalization can change the gain you set; fades use final playback seconds.</p>
+    </details>
+    <div class="audio-editor-controls audio-export-controls">
+      <label>Export
+        <select id="audioExportScope"><option value="track">Whole edited track</option><option value="selection">Selected section only</option></select>
+      </label>
+      <label>File format
+        <select id="audioEditFormat">
+          <option value="wav">WAV</option>
+          <option value="mp3">MP3</option>
+          <option value="flac">FLAC</option>
+        </select>
+      </label>
+      <div class="audio-editor-actions">
+        <button id="audioEditUndoButton" type="button" disabled>Undo</button>
+        <button id="audioEditRedoButton" type="button" disabled>Redo</button>
+        <button id="audioEditResetButton" type="button" disabled>Reset audio edits</button>
+        <button id="audioEditExportButton" type="button" disabled>Export audio…</button>
+      </div>
+    </div>
+  </section>
   <section id="captionsPanel" class="paths workspace-card captions-card">
+    <div class="caption-set-toolbar">
+      <label for="captionSetSelect">Captions for</label>
+      <select id="captionSetSelect" disabled><option>No caption sets yet</option></select>
+      <button id="captionRemapButton" type="button" disabled>Adjust caption timing…</button>
+    </div>
+    <p id="captionTimingNotice" class="caption-timing-notice" role="status" hidden></p>
     <div class="caption-segments-header">
       <span class="label">Caption Segments</span>
       <div class="caption-segments-header-actions">
@@ -194,9 +286,21 @@
   </aside>
   </div>
 
+  <dialog id="captionRemapDialog" class="caption-remap-dialog" aria-labelledby="captionRemapTitle" aria-describedby="captionRemapHelp">
+    <h2 id="captionRemapTitle">Preview caption timing changes</h2>
+    <p id="captionRemapHelp">Create a copy timed to the edited audio. Existing captions and your text corrections stay unchanged.</p>
+    <p id="captionRemapSummary" role="status"></p>
+    <div id="captionRemapChanges" class="caption-remap-changes"></div>
+    <p id="captionRemapReview" class="caption-timing-notice" hidden>Review the highlighted captions in the new copy. Cuts can remove words or change where a caption should start and end.</p>
+    <div class="audio-editor-actions">
+      <button id="captionRemapCancel" type="button">Cancel</button>
+      <button id="captionRemapCreate" type="button">Create adjusted caption copy</button>
+    </div>
+  </dialog>
   <script src="./browser-globals.js"></script>
   <script src="./timestamp-utils.js"></script>
   <script src="./subtitle-utils.js"></script>
+  <script src="./audio-edit-utils.js"></script>
   <script src="./renderer.js"></script>
 </body>
 </html>

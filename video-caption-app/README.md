@@ -18,12 +18,16 @@ This project provides a privacy-friendly local workflow for generating captions,
 - Open video through **File > Open Video** or `Ctrl+O`
 - Upload existing audio when you only need captions
 - Extract mono 16 kHz WAV audio from video with FFmpeg
-- Convert uploaded `.m4a` audio to temporary mono 16 kHz WAV before Whisper
+- Prepare a separate mono 16 kHz transcription copy for every accepted source format
 - Generate `.srt` and `.vtt` captions locally with the local Whisper runtime
 - Show compact Activity status for extraction, conversion, captioning, and clipping
 - Cancel active FFmpeg or Whisper work from the Activity panel
 - Inspect and filter FFmpeg/Whisper output in a resizable log drawer
 - Preview selected video or uploaded audio in an embedded HTML5 player
+- Single-track audio editing with a measured waveform, zoom, split/keep/remove/duplicate, Undo and Redo, per-clip and whole-edit effects, and WAV/MP3/FLAC export
+- Compare original playback with an edited preview produced by the same processing graph as export
+- Generate captions from the original recording or edited audio without exporting and importing it again
+- Preserve separate caption versions and manually corrected text; optionally preview timing changes and create an adjusted copy
 - Parse generated captions into a scrollable Caption Segments list
 - Click caption segments to seek preview playback and set clip ranges
 - Select multi-caption clip ranges with a two-click start/end workflow
@@ -72,7 +76,7 @@ npm start
 
 Native executables and DLLs are not committed. `scripts/setup-windows.ps1` installs exactly the runtime components the app uses:
 
-- Gyan FFmpeg essentials build 8.1.1: `ffmpeg.exe`
+- Gyan FFmpeg essentials build 8.1.1: `ffmpeg.exe` and `ffprobe.exe`
 - whisper.cpp 1.8.3: `whisper.exe` and its four required DLLs
 - `ggml-base.en.bin` from a pinned Hugging Face revision
 
@@ -97,8 +101,8 @@ See [`docs/native-runtime.md`](docs/native-runtime.md) for provenance, published
 ### Start from video
 
 1. Click **Upload Video**, drag one supported video into the drop zone, or use **File > Open Video**.
-2. Click **Extract Audio**. FFmpeg creates a temporary mono 16 kHz WAV, then the app immediately opens a save dialog for an optional permanent copy.
-3. Click **Generate Captions**. Whisper writes temporary SRT/VTT files and populates **Caption Segments**.
+2. Optionally open **Audio Editor** to edit the video's original-quality audio. **Extract Audio** remains available for saving a separate mono 16 kHz transcription copy.
+3. Choose **Original audio** or **Edited audio**, then click **Generate Captions**. Whisper writes temporary SRT/VTT files and populates **Caption Segments**.
 4. Review, search, and edit the caption text. Click caption rows to seek the preview and populate the clip start/end fields.
 5. Click **Save SRT** or **Save VTT** and choose a destination. The exported file includes current inline edits.
 6. Create a single clip with **Create clip**, or click **Add clip range** for each range and then **Export All Clips**.
@@ -106,10 +110,18 @@ See [`docs/native-runtime.md`](docs/native-runtime.md) for provenance, published
 ### Start from audio
 
 1. Click **Upload Audio** or drag one supported audio file into the drop zone.
-2. Click **Generate Captions**.
+2. Optionally edit the audio, choose **Original audio** or **Edited audio**, then click **Generate Captions**.
 3. Review and edit the generated segments, then save SRT or VTT.
 
-Uploaded `.m4a` files are converted to temporary mono 16 kHz WAV files before transcription. Other accepted audio formats are passed directly to Whisper.
+Every accepted source is converted to a separate temporary mono 16 kHz WAV for Whisper. Editing and WAV/FLAC exports retain the source sample rate and channel count; MP3 requires a compatible mono/stereo source at up to 48 kHz.
+
+### Edit audio
+
+Use **Split at playhead** to keep both pieces, **Keep selection** to trim away the rest, or **Remove selection** to close a gap. **Duplicate selection** inserts another copy on the same track. Clip controls change one selected clip; whole-edit controls apply to the assembled recording. Undo and Redo restore committed edits. The saved edit returns after restart; undo history starts afresh.
+
+**Play original** and **Preview edited audio** make the playback source explicit. Edited playback is prepared locally with FFmpeg. Export uses the same processing rules, including independent speed and pitch, fades, noise reduction and two-pass loudness normalization. Master fades are applied after normalization, so the final integrated loudness may be lower than the preset target.
+
+Caption versions retain the audio edit they describe. Changing audio never moves captions automatically. **Adjust caption timings** previews moved, removed and duplicated cues; **Create adjusted copy** keeps the original set and its wording. Cues crossing cuts are marked for review. Multiple tracks and replacing video soundtracks remain future work. See the [implementation plan](docs/audio-editor-plan.md) for verification and remaining acceptance checks.
 
 ### Supported source formats
 

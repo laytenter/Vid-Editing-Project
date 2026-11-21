@@ -5,7 +5,8 @@
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/copy-static.js && node scripts/check-browser-script-scope.js",
-    "test": "tsc -p tsconfig.tests.json && node .tmp-test/tests/timestamp-utils.test.js && node .tmp-test/tests/subtitle-utils.test.js",
+    "test": "tsc -p tsconfig.tests.json && node scripts/run-tests.js",
+    "test:electron": "npm run build && node scripts/run-electron-smoke.js",
     "start": "npm run build && set ELECTRON_RUN_AS_NODE=&& .\\node_modules\\.bin\\electron.cmd ."
   },
   "keywords": [],
