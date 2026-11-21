@@ -271,6 +271,15 @@ npm run test:electron
 
 The native tests check processing against synthetic audio. The Electron suite uses isolated test profiles and fixtures under `.tmp-test/`; it does not use personal recordings. Automated checks do not establish listening quality, long-recording performance, or screen-reader acceptance. See the [audio editor plan](docs/audio-editor-plan.md) for remaining checks.
 
+If Windows Controlled Folder Access blocks a newly installed Electron from creating test files under Documents, keep protection enabled and use an isolated temporary test directory:
+
+```powershell
+$env:AUDIO_SMOKE_WORK = Join-Path $env:TEMP ('vid-editing-smoke-' + [guid]::NewGuid().ToString('N'))
+npm run test:electron
+Remove-Item Env:AUDIO_SMOKE_WORK
+```
+
+This changes the test fixtures/profile location only. The default remains `.tmp-test/` in the repository.
 GitHub Actions and Dependabot use this same root package and lockfile. The [GitHub repository](https://github.com/laytenter/Vid-Editing-Project) is the source of truth; commit source/configuration/docs, not installed runtimes or generated output.
 
 ### Architecture

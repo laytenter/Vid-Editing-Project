@@ -23,3 +23,5 @@ This move changes directory organization and app naming. It does not implement f
 The default `main` branch should represent the current maintained app. Use short-lived feature branches and pull requests for later changes. Keep existing branches until their work has been incorporated and their owners no longer need them; this reorganization does not require deleting branches or rewriting history.
 
 GitHub Actions builds, tests and audits the root package. Dependabot monitors `/` for npm and GitHub Actions. Relative documentation links point to the flattened source tree. The repository's broader existing name and remote URL are retained.
+
+The root move itself preserved the dependency graph. The first GitHub check then found current advisories in existing packages, so a separate follow-up updates Electron to 43.8.12, fast-uri to 3.1.9 and undici to 7.30.2. Native FFmpeg/Whisper versions and verification digests are unchanged. Dependency review also requires Dependency graph to be enabled in GitHub repository security settings; keep that check enabled.
