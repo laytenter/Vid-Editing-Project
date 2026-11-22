@@ -92,13 +92,45 @@ const js = async (code) => {
   try { return await win.webContents.executeJavaScript(code, true); }
   catch (error) { console.error("Failed renderer expression:", code.slice(0,240), rendererErrors); throw error; }
 };
-const click = (id) => js(`document.getElementById(${JSON.stringify(id)}).click()`);
-const field = (id, value) => js(`(() => { const el=document.getElementById(${JSON.stringify(id)}); el.value=${JSON.stringify(value)}; el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true})); })()`);
+// Functions below are test-owned source. Values cross the debugger protocol as
+// structured arguments and are never interpolated into executable JavaScript.
+async function callRenderer(fn, ...values) {
+  const client = win.webContents.debugger;
+  if (!client.isAttached()) client.attach("1.3");
+  const { result: target } = await client.sendCommand("Runtime.evaluate", { expression: "globalThis" });
+  assert.ok(target.objectId, "renderer global must be available");
+  try {
+    const response = await client.sendCommand("Runtime.callFunctionOn", {
+      objectId: target.objectId,
+      functionDeclaration: fn.toString(),
+      arguments: values.map(value => ({ value })),
+      awaitPromise: true,
+      returnByValue: true,
+      userGesture: true
+    });
+    if (response.exceptionDetails) {
+      throw new Error(response.exceptionDetails.exception?.description || response.exceptionDetails.text);
+    }
+    assert.equal(response.result.unserializableValue, undefined, "renderer result must be serializable");
+    return response.result.value;
+  } finally {
+    await client.sendCommand("Runtime.releaseObject", { objectId: target.objectId }).catch(() => {});
+  }
+}
+const click = id => callRenderer(function (elementId) {
+  document.getElementById(elementId).click();
+}, id);
+const field = (id, value) => callRenderer(function (elementId, fieldValue) {
+  const el = document.getElementById(elementId);
+  el.value = fieldValue;
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+  el.dispatchEvent(new Event("change", { bubbles: true }));
+}, id, value);
 const saved = async () => { await delay(450); return js("window.videoTools.getCaptionProject()"); };
 const pass = (name) => console.log(`PASS Electron: ${name}`);
 async function screenshot(name, width=1280, height=900, theme="dark") {
   win.setSize(width,height);
-  await js(`window.videoTools.setSettings({themeMode:${JSON.stringify(theme)}})`);
+  await callRenderer(function (themeMode) { return window.videoTools.setSettings({ themeMode }); }, theme);
   // Windows needs a composited surface; showing without focus preserves other apps.
   win.showInactive();
   await delay(300);
@@ -113,6 +145,31 @@ async function main() {
   await js("window.confirm = () => true; window.__smokeErrors=[]; window.addEventListener('unhandledrejection',e=>window.__smokeErrors.push(String(e.reason)))");
   await delay(300);
   assert.equal(rendererErrors.length, 0, rendererErrors.join("\n"));
+  // Code-like field IDs and values must stay data across the main/renderer boundary.
+  const hostileId = '__smoke";globalThis.__smokeCodeInjected=true;//';
+  const hostileValue = "'\"\\\r\n\t\0</script><script>globalThis.__smokeCodeInjected=true</script>\u2028\u2029";
+  await callRenderer(function (elementId) {
+    window.__smokeCodeInjected = false;
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.id = elementId;
+    input.dataset.inputEvents = "0";
+    input.dataset.changeEvents = "0";
+    for (const name of ["input", "change"]) {
+      input.addEventListener(name, () => { input.dataset[name + "Events"] = String(Number(input.dataset[name + "Events"]) + 1); });
+    }
+    document.body.appendChild(input);
+  }, hostileId);
+  await field(hostileId, hostileValue);
+  const roundTrip = await callRenderer(function (elementId) {
+    const input = document.getElementById(elementId);
+    const result = { value: input.value, inputEvents: Number(input.dataset.inputEvents), changeEvents: Number(input.dataset.changeEvents), injected: window.__smokeCodeInjected };
+    input.remove();
+    delete window.__smokeCodeInjected;
+    return result;
+  }, hostileId);
+  assert.deepEqual(roundTrip, { value: hostileValue, inputEvents: 1, changeEvents: 1, injected: false });
+  pass("code-like field IDs and values remain data without executing");
   if (restoring) {
     await until(() => js("document.getElementById('audioEditorStatus').textContent.includes('Ready')"), "source restored after full app restart");
     const expected = JSON.parse(fs.readFileSync(path.join(work, "expected-session.json"), "utf8"));
@@ -146,7 +203,10 @@ async function main() {
   }
   await click("selectAudioButton");
   await until(() => js("document.getElementById('audioEditorStatus').textContent.includes('Ready')"), "audio analysis");
-  await js(`(async () => { window.__smoke={analysis:await window.videoTools.analyzeAudio(${JSON.stringify(fixture)})}; window.__smoke.base=window.audioEditUtils.createProject(window.__smoke.analysis); })()`);
+  await callRenderer(async function (sourcePath) {
+    window.__smoke = { analysis: await window.videoTools.analyzeAudio(sourcePath) };
+    window.__smoke.base = window.audioEditUtils.createProject(window.__smoke.analysis);
+  }, fixture);
   const analysis = await js("window.__smoke.analysis");
   assert.equal(analysis.channels, 2);
   assert.equal(analysis.sampleRate, 48000);
@@ -190,14 +250,22 @@ async function main() {
 
   // A cut which keeps both pieces must not restart their fade or tempo filters.
   for (const effects of [{}, {speed: 1.5, pitchSemitones: 3}]) {
-    const pair = await js(`(async () => { const u=window.audioEditUtils; const p=u.updateEffects(u.cloneProject(window.__smoke.base),${JSON.stringify(effects)}); p.clips[0].fadeInSeconds=4; p.clips[0].fadeOutSeconds=2; const whole=await window.videoTools.renderEditedAudio({project:p,format:'wav',purpose:'preview'}); const split=await window.videoTools.renderEditedAudio({project:u.splitAt(p,2),format:'wav',purpose:'preview'}); return [whole,split]; })()`);
+    const pair = await callRenderer(async function (effectSettings) {
+      const u = window.audioEditUtils;
+      const p = u.updateEffects(u.cloneProject(window.__smoke.base), effectSettings);
+      p.clips[0].fadeInSeconds = 4;
+      p.clips[0].fadeOutSeconds = 2;
+      const whole = await window.videoTools.renderEditedAudio({ project: p, format: "wav", purpose: "preview" });
+      const split = await window.videoTools.renderEditedAudio({ project: u.splitAt(p, 2), format: "wav", purpose: "preview" });
+      return [whole, split];
+    }, effects);
     assert.deepEqual(decodedPcm(pair[1].outputPath), decodedPcm(pair[0].outputPath), "split preserves decoded audio including fades and tempo/pitch");
   }
   pass("split preserves real fade and tempo/pitch output sample for sample");
 
   for (const format of ["mp3", "flac"]) {
     saveTarget = path.join(work, `export.${format}`);
-    const result = await js(`window.videoTools.renderEditedAudio({project:window.__smoke.base,format:${JSON.stringify(format)},purpose:'export'})`);
+    const result = await callRenderer(function (outputFormat) { return window.videoTools.renderEditedAudio({ project: window.__smoke.base, format: outputFormat, purpose: "export" }); }, format);
     assert.ok(fs.existsSync(result.outputPath));
     assert.equal(probe(result.outputPath).streams[0].channels, 2);
   }
@@ -234,7 +302,7 @@ async function main() {
     {index:2,start:"00:00:08.000",end:"00:00:09.000",text:"Outside the selected section",edited:true}
   ];
   await field("captionSetSelect",session.captionSets[0].id);
-  await js(`setCaptionSegments(${JSON.stringify(corrected)}); persistActiveCaptionSet(); scheduleCaptionProjectSave()`);
+  await callRenderer(function (segments) { setCaptionSegments(segments); persistActiveCaptionSet(); scheduleCaptionProjectSave(); }, corrected);
   await until(async () => (await saved()).captionSets[0].segments[0]?.text === corrected[0].text, "corrected caption fixture saved");
   await click("captionRemapButton");
   assert.equal(await js("document.getElementById('captionRemapDialog').open"), true);
