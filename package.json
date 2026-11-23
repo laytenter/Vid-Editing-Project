@@ -23,9 +23,9 @@
     "electron-store": "8.2.0"
   },
   "devDependencies": {
-    "@types/node": "22.19.11",
-    "electron": "43.8.12",
-    "typescript": "5.9.3"
+    "@types/node": "26.6.6",
+    "electron": "45.4.1",
+    "typescript": "7.0.2"
   },
   "allowScripts": {
     "electron@43.8.12": true
